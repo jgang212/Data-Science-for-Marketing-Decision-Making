@@ -1,0 +1,718 @@
+---
+title: "data.table - Introduction"
+author: "Günter J. Hitsch"
+date: "December 2017"
+output: pdf_document
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA)
+```
+
+\bigskip
+
+**Note**: Don't forget to install the data.table package before you work through this introduction.
+
+
+\bigskip
+
+## Why use data.table?
+
+data.table is both a Swiss army knife and a powerful weapon for data science to perform rapid computations and manipulations of your data. Much of my work with my collaborators and research assistants is performed using data.table.  It takes some time to master data.table, but once you know it well it allows you to perform almost any manipulation of your data.  Note that there is another excellent R package that is widely used for data manipulation, called dplyr.  I prefer data.table, because it is self-contained and incredibly fast, but dplyr has its virtues, too.  
+
+The data.table homepage is <https://github.com/Rdatatable/data.table/wiki>, and the *Getting started* link provides several learning resources.
+
+Most importantly, the **HTML vignettes** that you can find on the *Getting started* page, <https://github.com/Rdatatable/data.table/wiki/Getting-started>, provide an excellent overview of the main features of data.table.
+
+\bigskip
+
+In this introduction I will highlight some key features of data.table. To learn, you should **first read the detailed HTML vignettes** before you work through the examples in this guide.
+
+
+
+
+\newpage
+
+## 1. Introduction to data.table
+
+### Introduction, and how to create a data.table
+
+**Reference**: *Introduction to data.table*, 1.a
+
+In R, data are captured as data frames---spreadsheets with columns that can be different types, such as double floating point numbers, integers, strings, and logical (TRUE/FALSE) types).  The data.table package builds on the data frame type, and introduces a syntax and methods to efficiently manipulate data, including very large data sets.
+
+Let's create a data set that contains information on four customers in two markets, A and B.  We observe the activity of the customers on the website of an online retailer, including total spending and the number of logins to the website. The data record customer behavior for five months.
+
+```{r}
+library(data.table)
+set.seed(939)
+
+DT = data.table(market   = rep(c("A", "B"), each = 10),
+                customer = rep(1:4, each = 5),
+                month    = rep(1:5, times = 4),
+                spend    = ceiling(runif(20, min = 0, max = 11)) - 1,
+                login    = ceiling(runif(20, min = 0, max = 6)) - 1
+               )
+```
+
+Note that I will not provide specific comments on an R function or command if the function/command is easy to understand using the documentation. For example, `?rep` shows you how to replicate elements in a vector.
+
+`runif` invokes a random number generator to simulate data (total spend and logins) from a uniform distribution with bounds specific by `min` and `max`. I round the data using `ceiling` to obtain integer values.
+
+Note that I set a random number generator seed (`set.seed`) to ensure that I always get the same random numbers when I execute the code.
+
+Let's look at the resulting data.table:
+
+```{r}
+DT
+```
+
+You can convert a data.table to a data frame, and vice versa:
+
+```{r}
+DF   = as.data.frame(DT)
+DT_a = as.data.table(DF)
+
+identical(DT, DF)
+identical(DT, DT_a)
+```
+
+
+
+\bigskip
+
+### The general syntax of data.table, and subsetting rows
+
+**Reference**: *Introduction to data.table*, 1.b and 1.c
+
+All manipulations in data.table have the format:
+
+`DT[i, j, by]`
+
+`i` refers to specific rows, `j` refers to specific columns and manipulations involving the columns, and `by` refers to specific groups in the data.table. The manipulations are performed separately for each group.
+
+##### Examples
+
+```{r}
+DT_a = DT[c(3,9,12)]                               # Subset rows 3, 9, and 12
+DT_b = DT[11:15]                                   # Subset rows 11-15
+DT_c = DT[market == "A"]                           # Subset all observations in market A
+DT_d = DT[market == "A" & month >= 2 & month < 5]  # Subset market A observations, but only months 2-4
+DT_e = DT[month %in% c(1,4,5)]                     # Subset all observations with months 1, 4, and 5
+```
+
+Type any of these data.tables, such as `DT_d`, in the command line or execute inside a code chunk to see the result.
+
+Note the logical **and**, `&`. The logical **or** is `|`, and `!` is the negation (**not**). 
+
+```{r}
+DT_f = DT[month >= 3 & month != 4]
+```
+
+Read the section on how to **sort** data, and make sure you understand these examples:
+
+```{r}
+DT_ord_a = DT[order(market, -customer)]
+DT_ord_b = DT[order(market, customer, -month)]
+```
+
+
+
+\bigskip
+
+### Selecting and manipulating columns
+
+**Reference**: *Introduction to data.table*, 1.d, 1.e
+
+Select a column as a *vector*, first the data.table way and then how you would select a column in a data frame:
+
+```{r}
+spend   = DT[, spend]
+spend_a = DT$spend
+
+identical(spend, spend_a)
+```
+
+Select one or more columns as data.tables:
+
+```{r}
+DT_a = DT[, list(spend)]
+DT_b = DT[, .(customer, spend)]
+```
+
+Note: `.(name1, name2, ...)` is synonymous with `list(name1, name2, ...)`.
+
+Rename while selecting columns:
+
+```{r}
+DT_c = DT[, .(customer_id = customer, total_spend = spend)]
+```
+
+Select and compute, such as the average spend across all customers and months in `DT`:
+
+```{r}
+DT[, mean(spend)]
+```
+
+
+
+\bigskip
+
+### Simultaneously selecting rows and columns
+
+**Reference**: *Introduction to data.table*, 1.f
+
+Now lets choose rows `i` and columns `j` according to the syntax `DT[i, j, by]`.
+
+```{r}
+DT_a = DT[month <= 3, .(customer, month, spend)]
+DT_b = DT[month <= 3 & customer == 4, .(month, spend)]
+```
+
+Calculate the average spending per month of customer 4:
+
+```{r}
+DT[customer == 4, mean(spend)]
+```
+
+
+
+\bigskip
+
+### Additional methods to select or deselect columns
+
+**Reference**: *Introduction to data.table*, 1.g
+
+Using `with = FALSE` provides some additional functionality:
+
+```{r}
+DT_1 = DT[, .(customer, month, spend)]                      
+DT_2 = DT[, c("customer", "month", "spend"), with = FALSE]
+DT_3 = DT[, -c("market", "login"), with = FALSE]
+DT_4 = DT[, !c("market", "login"), with = FALSE]
+DT_5 = DT[, customer:spend, with = FALSE]
+```
+
+Convince yourself that all of these five data.tables are identical!
+
+Create a variable that contains the column names to be selected:
+
+```{r}
+variables = c("customer", "month", "spend")
+```
+
+To select the corresponding columns, use:
+
+```{r}
+DT_7 = DT[, variables, with = FALSE]
+DT_8 = DT[, ..variables]
+```
+
+Again, we obtain identical data.tables.
+
+Note that this does not work, however:
+
+```{r, eval = FALSE}
+DT_9 = DT[, variables]        # Yields an error!
+```
+
+
+
+\newpage
+
+## 2. Groups and aggregation
+
+### Performing computations for separate groups in the data
+
+**Reference**: *Introduction to data.table*, 2.a
+
+Recall the general syntax:
+
+`DT[i, j, by]`
+
+`by` refers to specific groups in the data.table and allows you to manipulate each group separately.
+
+Let's first calculate the average spend across all customers and months:
+
+```{r}
+DT_a = DT[, .(avg_spend = mean(spend))]
+```
+
+This operation yields a data.table with one number only.
+
+Now let's calculate the average spend for each customer separately:
+
+```{r}
+DT_b = DT[, .(avg_spend = mean(spend)), by = customer]
+DT_b
+```
+
+Then also add the maximum number of logins:
+
+```{r}
+DT_c = DT[, .(avg_spend = mean(spend),
+              max_login = max(login)), by = customer]
+DT_c
+```
+
+Calculate the mean spend across customers for each market and month separately:
+
+```{r}
+DT_d = DT[, .(avg_spend = mean(spend)), by = .(market, month)]
+DT_d
+```
+
+In market A only:
+
+```{r}
+DT_e = DT[market == "A", .(avg_spend = mean(spend)), by = .(market, month)]
+DT_e
+```
+
+And again, let's also add the maximum number of logins:
+
+```{r}
+DT_f = DT[market == "A", .(avg_spend = mean(spend),
+                           max_login = max(login)), by = .(market, month)]
+DT_f
+```
+
+
+
+\bigskip
+
+### Manipulate multiple columns
+
+**Reference**: *Introduction to data.table*, 2.e, 2.f
+
+Sometimes we want to apply the same operation or function to multiple columns. For example, we may want to calculate both the mean of spending and the mean number of logins across customers and months in each market:
+
+```{r}
+DT_g = DT[, lapply(.SD, mean), by = market]
+DT_g
+```
+
+Explanations:
+
+1. `.SD` means *subset of data*. `.SD` is a data.table that includes all columns in the group that is defined by `by = ...`
+
+2. The `lapply` (list apply) function applies a specific function to all the elements in a list. In our application above, `.SD` specifies a list of columns, and the function that is applied to each column is `mean`.
+
+Note that the `mean` was applied to all columns, including customer and month, which we did not intend. To calculate the mean only for specific columns we indicate the name of these columns in `.SDcols`:
+
+```{r}
+DT_f = DT[, lapply(.SD, mean), by = market, .SDcols = c("spend", "login")]
+DT_f
+```
+
+We can also use `.SD` to subset rows from separate groups:
+
+```{r}
+DT_first_two = DT[, head(.SD, 2), by = customer]
+DT_first_two
+```
+
+Here, `head` chooses the first two rows.
+
+Now let's chose the last row with `tail`:
+
+```{r}
+DT_last_one  = DT[, tail(.SD, 1), by = customer]
+DT_last_one
+```
+
+To choose the last three rows, use `tail(.SD, 3)` instead.
+
+
+
+\newpage
+
+## 3. Reference semantics
+
+For most of you the title of this section will be rather obscure. It refers to operations on data.table objects that do not result in *new* data tables, as in some of the examples we discussed so far. Instead, we manipulate existing data.tables, for example by adding or updating a column. data.table is extremely good and efficient at such operations, while similar operations on data frames can result in a large waste of memory.
+
+See Sections 1.a and 1.b in the *Reference semantics* HTML vignette for more details.
+
+
+
+\bigskip
+
+### Manipulating columns using the `:=` operator
+
+**Reference**: *Reference semantics*, 2.a, b, c, d
+
+We'll continue to work with the data.table that we used before.
+
+Let's create two vectors with data on (i) whether a customer received a promotional e-mail in a given month (0/1, where 1 means the customer received a promotional e-mail), and (ii) if the customer account can be matched to a Facebook account for retargeting purposes (also 0/1).
+
+```{r}
+set.seed(211)
+
+promo_vector    = rbinom(20, 1, prob = 0.6)
+facebook_vector = rep(rbinom(4, 1, prob = 0.5), each = 5)
+```
+
+Add the vector indicating the receipt of e-mails to DT:
+
+```{r, results = "hide"}
+DT[, promo := promo_vector]
+```
+
+The `:=` operator manipulates the *existing* data.table, but does not create a new one.
+
+Add multiple columns:
+
+```{r, results = "hide"}
+DT[, `:=`(promo = promo_vector, facebook = facebook_vector)]
+```
+
+Alternatively, to write clean, readable code and add comments:
+
+```{r, results = "hide"}
+DT[, `:=`(promo    = promo_vector,          # Add promo e-mail data
+          facebook = facebook_vector)]      # Add facebook-match data
+```
+
+Instead of creating new columns based on data outside the data.table, you can also create columns based on data that already exist in the data.table:
+
+```{r, results = "hide"}
+DT[, `:=`(mean_spend = mean(spend),
+          mean_promo = mean(promo))]
+
+DT[, median_vs_mean_spend := median(spend)/mean(spend)]
+```
+
+To delete one or multiple columns:
+
+```{r, results = "hide"}
+DT[, median_vs_mean_spend := NULL]
+DT[, c("mean_spend", "mean_promo") := NULL]     
+```
+
+However, note that this does not work:
+```{r, eval = FALSE}
+DT[, .(mean_spend, mean_promo) := NULL]     # Error!
+```
+
+All of these manipulations can be performed for specific rows only, or for groups separately, according to the data.table syntax
+
+`DT[i, j, by]`
+
+First, let's set the facebook variable to 0, but only for customers (observations) in market B:
+
+```{r, results = "hide"}
+DT[market == "B", facebook := 0]
+```
+
+Second, let's calculate the mean spend for each customer separately:
+
+```{r, results = "hide"}
+DT[, mean_spend := mean(spend), by = customer]
+```
+
+As before, you can also create multiple columns at the same time for groups defined by multiple variables:
+
+```{r, results = "hide"}
+DT[, `:=`(mean_spend = mean(spend),
+          mean_promo = mean(promo)),  by = .(market, month)]
+```
+
+
+
+\bigskip
+
+### Manipulating multiple columns using the `:=` operator
+
+**Reference**: *Reference semantics*, 2.e
+
+Recall the special symbol `.SD` that stands for *subset of data*. Using `.SD` and `.SDcols` we can apply the same function to multiple columns and assign the results to new columns in the data.table.
+
+Let’s first delete the two columns that we just created:
+
+```{r, results = "hide"}
+DT[, c("mean_spend", "mean_promo") := NULL]
+```
+
+Now let’s recreate them using `.SD`.
+
+```{r, results = "hide"}
+in_cols  = c("spend", "promo")
+out_cols = c("mean_spend", "mean_promo")
+
+DT[, (out_cols) := lapply(.SD, mean), by = .(market, month), .SDcols = in_cols]
+```
+
+This is a quick and clean way of creating or updating multiple columns. Just make sure to put the curved brackets around the output variable vector: `(out_cols)`!
+
+
+
+\newpage
+
+### Advanced topic: Be careful when using reference semantics after passing a data.table to a function
+
+Please read *Reference semantics*, 3. a, b, to understand the details.
+
+To illustrate a nasty problem that you could run into, let’s first create a very simple data.table.
+
+```{r}
+DT = data.table(x = 1:5, y = 21:25)
+```
+
+We may want to pass this data.table to a function which manipulates the data inside, such as this function,which adds 1 to the column y and then returns the max of y:
+
+```{r}
+addOneMax <- function(D) {
+  D[, y := y + 1]
+  return(max(D[, y]))
+}
+```
+
+Before calling this function, our simple data.table is:
+
+```{r}
+DT
+```
+
+After calling the function, the y column is different:
+
+```{r}
+v = addOneMax(DT)
+DT
+```
+
+This happens because only a *shallow copy* of the data.table was passed to the function, and therefore the original data.table DT that lives outside the function can be manipulated from inside the function. To change this behavior, create a *deep copy* using the copy function:
+
+
+```{r}
+addOneMax_ver_2 <- function(D) {
+  D = copy(D)                        # Here a deep copy is created!
+  D[, y := y + 1]
+  return(max(D[, y]))
+}
+
+DT = data.table(x = 1:5, y = 21:25)
+v  = addOneMax_ver_2(DT)
+DT
+```
+
+Problem solved!
+
+Generally, in most situations you want to use `copy` if you pass a data.table to a function and use operations by reference that use `:=`.
+
+
+
+
+\newpage
+
+## 4. Keys
+
+**Reference**: *Keys and fast binary search based subset*, 1.a-c
+
+Let's create a data.table that contains data of online product view episodes including the product name, the date, and whether a purchase was made.
+
+```{r}
+library(data.table)
+set.seed(251)
+
+N_rows = 10
+DT = data.table(product   = sample(letters[1:3], N_rows, TRUE),
+		            view_date = sample(100, N_rows, TRUE),
+	              purchase  = rbinom(N_rows, size = 1, prob = 0.2)
+		           )
+DT
+```
+
+The data.table package allows us to set a *key* for a data.table object. The key provides an order for the data.table that is useful for fast searches and merging (joining) data.tables.
+
+Let's use the product name as key:
+
+```{r}
+setkey(DT, product)
+DT
+```
+
+`DT` is now sorted according to the product name.
+
+We can also set a key according to multiple columns. Let's add the view date as a second key column:
+
+```{r}
+setkey(DT, product, view_date)
+DT
+```
+
+Alternatively, `setkeyv(DT, c("product", "view_date"))` performs the exact same operation.
+
+To reveal the key column(s) that have been set for a data.table:
+
+```{r}
+key(DT)
+```
+
+
+
+\newpage
+
+### 4.1 Using keys to merge data.tables (joins)
+
+Let's create some additional product information, including a product code and the price:
+
+```{r}
+product_info = data.table(product      = letters[2:5],
+                          product_code = c(10030022, 10104733, 12044012, 10104734),
+                          price        = c(249, 599, 199, 599)
+                         )
+product_info
+```
+
+How can we add this information to the product view data? --- First, let's make sure both data.tables are keyed using the same column:
+
+```{r}
+setkey(DT, product)
+setkey(product_info, product)
+```
+
+Then we perform a merge:
+
+```{r}
+DT_a = merge(DT, product_info)
+DT_a
+```
+
+Note that `product_info` contains no information on product a, hence the data rows in `DT` for product a were dropped. Instead, if you want to keep all observations in the original data.table:
+
+```{r}
+DT_b = merge(DT, product_info, all.x = TRUE)
+DT_b
+```
+
+`all.x` refers to the first data.table in the `merge` statement. Missing values are indicated as `NA`.
+
+`product_info` contains information on products d and e, which are not contained in `DT`. Note the effect of the option `all.y = TRUE`, referring to the second data.table in `merge`:
+
+```{r}
+DT_c = merge(DT, product_info, all.y = TRUE)
+DT_c
+```
+
+Experiment and see what happens if you set the option `all = TRUE` instead!
+
+You will often perform a merge along more than one key.  For example, let's add information on the availability of a promotion for a specific product and date:
+
+```{r}
+set.seed(933)
+
+promo_info = data.table(product   = rep(letters[1:5], each = 100),
+                        view_date = rep(1:100, times = 5),
+                        promo     = rbinom(500, size = 1, prob = 1/4)
+                       )
+```
+
+To merge this information with the original data:
+
+```{r}
+setkey(DT, product, view_date)
+setkey(promo_info, product, view_date)
+
+DT_d = merge(DT, promo_info)
+DT_d
+```
+
+
+
+\newpage
+
+### 4.2 Using keys to subset data
+
+**Reference**: *Keys and fast binary search based subset*, 1. - 4.
+
+We created a data.table of online product view episodes, and keyed the data along product name and date:
+
+```{r}
+key(DT)
+```
+
+Suppose we want to find all observations for product a:
+
+```{r}
+DT_1a = DT[.("a")]         # DT["a"] does the same thing
+```
+
+The result of this operation is identical to subsetting on the row(s) `i` in `DT[i, j, by]`, as you already learned:
+
+```{r}
+DT_1b = DT[product == "a"]
+identical(DT_1a, DT_1b)
+DT_1a
+```
+
+Note the argument `mult`. `mult = "all"` by default, which indicates to subset all matches. Compare to:
+
+```{r}
+DT_1a_first = DT[.("a"), mult = "first"]              # Retrieve first matching row only
+DT_1a_last  = DT[.("a"), mult = "last"]               # Retrieve last matching row only
+```
+
+Subsetting also works with multiple key columns and/or values to extract:
+
+```{r}
+DT_2 = DT[.("b", 42)]
+DT_3 = DT[.(c("a", "c"))]
+DT_4 = DT[.(c("c", "a", "a"), c(8, 28, 38))]
+```
+
+Another important argument is `nomatch`, which takes the value "NA" by default. 
+
+```{r}
+DT_5_NA = DT[.(c("a", "b", "d")), nomatch = NA]        # The default value      
+DT_5_0  = DT[.(c("a", "b", "d")), nomatch = 0]         # Drop a row if there is no match
+```
+
+The **advantage of subsetting using keys** is speed. When we subset using an expression such as `DT[product == "a"]`, data.table performs a *vector scan* and checks in each row of the data.table if the product name is a. When we subset using keys, data.table performs a *binary search* that is typically much faster. The HTML vignette explains this in detail.
+
+Proof by example: Let's create a 50 million observation version of the data.table that we worked with so far. Then compare the execution time of a vector scan and subsetting using keys.
+
+```{r}
+set.seed(251)
+
+N_rows = 50000000
+DT = data.table(product   = sample(letters, N_rows, TRUE),
+		            view_date = sample(100, N_rows, TRUE),
+	              purchase  = rbinom(N_rows, size = 1, prob = 0.2)
+		           )
+print(object.size(DT), units = "Mb")     # Amount of physical memory used to hold DT
+
+setkey(DT, product, view_date)
+
+system.time(DT_i  <- DT[product == "w" & view_date == 45])
+system.time(DT_ii <- DT[.("w", 45)])
+
+identical(DT_i, DT_ii)
+```
+
+The exact execution time depends on the processing power of your computer, but you should see a large relative difference in execution speed.
+
+
+\bigskip
+
+##### Warning
+
+While subsetting using keys has obvious speed advantages, there is also an important **disadvantage** that you should always keep in mind. Consider this example:
+
+```{r, eval = FALSE}
+DT[product == "w" & view_date == 45]
+DT[.("w", 45)]
+```
+
+Both operations yield the same result.  However, for most people, including myself, the first line is easier to read than the keyed search in the second line.
+
+This brings me to a general principle: There is often a **trade-off between readable code and fast code**. I always prefer readable over fast code unless there is a significant speed difference. And if I use less readable code, I always make sure to comment to clarify (to others and my future self) what the code is doing.
+
+```{r, eval = FALSE}
+
+DT_subset = DT[.("w", 45)]        # Note that DT is keyed on "product" and "view_date"
+```
+
+
+
+

@@ -1,0 +1,137 @@
+---
+title: "R Markdown Introduction"
+author: "Günter J. Hitsch"
+date: "December 2017"
+output: pdf_document
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## Why use R Markdown?
+
+R Markdown allows you to create dynamic documents that combine formatted text, R code, and the output of the R code.  It much facilitates a data scientist's workflow by keeping all information---code, text, and output---in one place.  R Markdown can create html, pdf, and Word files, and thus creates documents that you can share with (almost) anyone.
+
+I do not require that you use R Markdown in the *Data Science for Marketing Decision-Making* class.  In particular, if you have extensive experience using R and if you already have a workflow in place, maybe based on a high-quality text editor such as [Sublime Text](<https://www.sublimetext.com>), you are welcome to continue to use this workflow. Even then, however, you should consider using R Markdown because it provides a tremendous amount of convenience, it's easy to learn, and it's fun!
+
+
+## Learning R Markdown
+
+This document is a quick start guide to quickly get you up and running.  The official website, <https://rmarkdown.rstudio.com>, provides an excellent and in-depth overview. In particular, you should work through the following sections in **Get Started**:
+
+- Introduction
+- How It Works
+- Code Chunks
+- Inline Code
+- Parameters
+- Tables
+- Markdown Basics
+- Output Formats
+- Notebooks
+- Slide Presentations
+
+And download the *cheatsheets* (in R Studio: Help > Cheetsheets), they are incredibly useful!
+
+You may also want to study the other topics, including Dashboards, Websites, and Interactive Documents once you feel comfortable using R Markdown.
+
+
+
+## Getting started
+
+Install R and R Studio, and open the **R-Markdown-Introduction.Rmd** file, which is the source of the **R-Markdown-Introduction.pdf** document. You can now see the structure of the file in the R Studio code editor. Indeed, you will learn most efficiently when you compare the R Markdown source in the R Studio code editor with the final output.
+
+If you click the **Knit** button R Studio will create the output document. If you click the triangle next to the **Knit** button you are presented with a choice of the output formats, html, pdf, and Word. Confirm that you can create an html output document.
+
+To create pdf documents you need to install a LaTeX distribution on your computer.  If you are a Windows user, use MiKTeX (<https://miktex.org>), and if you use a Mac, use MacTeX (<http://www.tug.org/mactex>).  Once installed (maybe you need to restart your computer), confirm that you can knit a pdf file.
+
+
+## Formatting text
+
+You can find an extensive documentation here: <http://rmarkdown.rstudio.com/authoring_pandoc_markdown.html>, and the **R Markdown Reference Guide** has most of what you'll use on the first page (you can obtain the guide through R Studio: Help > Cheatsheets).
+
+#### Example
+
+```
+##### This is a small header
+
+**Important** characters in *Game of Thrones*:
+
+1. Daenerys
+2. Tyrion
+```
+
+The corresponding output:
+
+##### This is a small header
+
+**Important** characters in *Game of Thrones*:
+
+1. Daenerys
+2. Tyrion
+
+
+## Code chunks
+
+The main purpose of R Markdown is to combine formatted text with R code and its output. R code is executed within *code chunks*. The **Insert** button at the top of the R Studio text editor window provides an easy way of adding a new chunk to the document.  Try it!
+
+
+```{r Plot histogram}
+# Create a data frame including a vector of random elements drawn
+# from a normal distribution
+set.seed(321)
+v = rnorm(10000, mean = 2.0, sd = 3.0)
+DF = data.frame(v = v)
+
+# Let's use ggplot2 to plot a histogram of v
+library(ggplot2)
+ggplot(DF, aes(x = v)) +
+   geom_histogram(binwidth = 0.5, color = "navyblue", fill = "lightblue1")
+```
+
+##### Some important options
+
+Note the structure of an R code chunk, in particular the curly brackets in the chunk header, `{r}`. You can add a description of the chunk, such as `{r Estimate random forest}`, or include options, such as 
+
+`{r, include = FALSE}`
+
+This option will prevent the R code and its output from being displayed, although R will still run the code.  This can be useful if you need to calculate some intermediate results, but you don't want to show the corresponding code and process in your document. Another useful option is
+
+`{r, echo = FALSE}`
+
+Using this option R Markdown will not include the code, but only the output. Try using these options in the histogram example above.
+
+Sometimes you may want to just show some code without actually running (evaluating) the code. This can be achieved using
+
+`{r, eval = FALSE}`
+
+And if you would like to change the width and height of a plot, and maybe also center the figure, use the options
+
+`{r, fig.width = 4.0, fig.height = 3.0, fig.align = "center"}`
+
+These options are embedded in this code chunk:
+
+```{r, fig.width = 4.0, fig.height = 3.0, fig.align = "center"}
+ggplot(DF, aes(x = v)) +
+   geom_histogram(binwidth = 0.5, color = "navyblue", fill = "lightblue1")
+```
+
+
+## Notebooks
+
+Using a R Markdown file as a notebook is one of my favorite features.  Note the green triangle in the top right of the code chunk when you view the .Rmd source file in the R Studio editor. When you click the triangle the code chunk will be executed, and its output will be displayed directly in the editor window.  Try with the graph above!
+
+You can edit the code chunks, run them again, add text, etc. In this manner you can use your R Markdown file as an interactive notebook.  If you want, you can create a dedicated Notebook file, either by directly choosing *R Notebook* when you create a new file, or by clicking the Settings symbol in the menu on top of this window where you can then change the *Output Format* in the *Output Options*.
+
+For more information on Notebooks, see <http://rmarkdown.rstudio.com/r_notebooks.html>.
+
+
+## Workflow
+
+Some thoughts on creating an efficient workflow.  Almost always a real-world data analysis involves an initial and cumbersome data-processing stage.  I suggest to create a separate R Markdown file for this stage or---if you prefer---use a commented script. In this initial stage you will typically save your output (pre-processed data data frames, data.tables, etc.) in an .RData file.
+
+Once you start the actual analysis, you will load the pre-processed data and then use R Markdown to mix R code, the output, and your comments and explanations.
+

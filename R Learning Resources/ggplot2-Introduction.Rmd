@@ -1,0 +1,571 @@
+---
+title: "Introduction to ggplot2"
+author: "Günter J. Hitsch"
+date: "December 2017"
+output: pdf_document
+urlcolor: blue
+graphics: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE,
+                      fig.width = 4.5, fig.height = 3, fig.align = "right")
+```
+
+
+
+
+# ggplot2 learning resources
+
+This document is intended as a brief introduction to ggplot2, not as a comprehensive overview.  As always, you'll learn by doing once you have a specific graph in mind that you need to create and format for your purposes.
+
+
+##### Official webpage and documentation:
+
+<http://ggplot2.org>
+
+<http://ggplot2.tidyverse.org/reference/>
+
+The ggplot2 documentation is really good!
+
+\medskip
+
+For reference, here are some aesthetic specifications and a list of all R color names:
+
+<http://ggplot2.tidyverse.org/articles/ggplot2-specs.html>
+
+<http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf>
+
+
+##### ggplot2 cheatsheet
+
+Great stuff !!!!!
+
+Get it through R Studio, Help > Cheatsheets
+
+
+##### Books
+
+[ggplot2: Elegant Graphics for Data Analysis](https://www.amazon.com/ggplot2-Elegant-Graphics-Data-Analysis-ebook/dp/B01GVCRF6M)
+
+Good and comprehensive, but you don't want to read it cover to cover.
+
+
+##### Online tutorials
+
+Both of these are recommended and doable in a few hours:
+
+<http://tutorials.iq.harvard.edu/R/Rgraphics/Rgraphics.html>
+
+<https://stats.idre.ucla.edu/r/seminars/ggplot2_intro/>
+
+
+
+
+\newpage
+
+# Create a simulated data set
+
+To illustrate how ggplot2 works, let's simulate a data.table that includes income, spending, the debt-to-income ratio, and a default indicator (0/1) for a sample of credit card customers.
+
+```{r, results = "hide"}
+library(data.table)
+set.seed(888)
+
+N = 500               # No. of observations
+
+DT = data.table(customer_id = sample(10000000, N),
+                income      = round(36*rweibull(N, shape = 1.3, scale = 1.6)))
+
+DT[, E_spending := 10 + 0.9*income - 0.001*income^2]
+DT[, spending   := E_spending + 0.25*E_spending*rnorm(N)]
+DT[, E_spending := NULL]
+
+DT[, has_debt := runif(N) < 0.8 - (0.5/300)*income]
+DT[, debt_to_income := has_debt*(0.6 - (0.5/300)*income)*runif(N)]
+
+DT[, z :=  - 0.1*income + 0.05*spending + 0.6*debt_to_income]
+DT[, default := runif(N) < exp(z)/(1 + exp(z))]
+```
+
+
+
+
+\newpage
+
+# ggplot2 essentials
+
+
+## The ggplot2 syntax
+
+The basic syntax has three elements:
+
+ - **data** 
+ - **aesthetic mappings**
+ - **layers**
+ 
+To understand what this means let's create a histogram to display the distribution of income in our artificial data set:
+
+```{r, warning = FALSE}
+library(ggplot2)
+
+ggplot(DT, aes(x = income)) +
+   geom_histogram()
+```
+
+The first element in the `ggplot` command is the **data set** (`DT` in our example). The second element specifies the **aesthetic mapping**, in this simple example the x-variable, `income`. These two elements specify the structure of the data to be displayed. The third element is a **layer** that instructs ggplot2 how to display the data. In our example, we create a histogram using the `geom_histogram` layer.
+
+Now let's plot spending versus income:
+
+```{r}
+ggplot(DT, aes(x = income, y = spending)) +
+   geom_point()
+```
+
+Here we also specify the y-axis variable, *spending*.
+
+Apart from the basic information contained in the x and y-axis variables we can also instruct ggplot2 to display other elements in the data. For example, we can re-create the spending versus income plot with different colors depending on the default behavior of a customer. All we need to do is to tell ggplot2 that the plot color should be mapped to the default variable:
+
+```{r}
+ggplot(DT, aes(x = income, y = spending, color = default)) +
+   geom_point()
+```
+
+Experiment with variations of this approach. For example, if you base the plot symbol shape on the default behavior (`shape = default`) or if you base the size of the data points on the debt-to-income ratio (`size = debt_to_income`). Example:
+
+```{r}
+ggplot(DT, aes(x = income, y = spending, size = debt_to_income, color = default)) +
+   geom_point()
+```
+
+**Warning**: If you want, you can go crazy with all the possible aesthetic settings in a graph. That doesn't mean it's necessarily a good idea to cram a lot of information into a graph. I advise you to keep your graphs clean and simple, and use multiple graphs if you would like to display different pieces of the information in your data set.
+
+
+
+## Multiple layers
+
+You can also use **multiple layers** to create a graph. For example, to add a non-parametric smoother (regression function) to the plot of spending versus income:
+
+```{r}
+ggplot(DT, aes(x = income, y = spending)) +
+   geom_point() +
+   geom_smooth()
+```
+
+
+
+## Facetting
+
+If you want to display your graphs separately for different groups in your data, faceting is a good solution. For example, we can plot the distribution of income separately for customers who defaulted and customers who did not default
+
+
+```{r}
+ggplot(DT, aes(x = income)) +
+   geom_histogram() +
+   facet_wrap(~ default)
+```
+
+Try to use `facet_wrap(~default, ncol = 1)` instead of `facet_wrap(~ default)`.
+
+
+
+## Themes
+
+ggplot2 has various built-in themes that modify how graphs are displayed. One of my favorites is `theme_bw()` (`theme_minimal()` is also good):
+
+```{r}
+ggplot(DT, aes(x = income, y = spending, size = debt_to_income, color = default)) +
+   geom_point() +
+   theme_bw()
+```
+
+Here are all the built-in themes: <http://docs.ggplot2.org/current/ggtheme.html>. You can create and modify your own themes; please consult the additional learning resources.
+
+
+
+## Saving/printing plots
+
+First, instead of printing a plot right away, you can save it/assign it to a variable:
+
+```{r}
+my_histogram = ggplot(DT, aes(x = income)) + geom_histogram()
+```
+
+Then, sometime later, you can print it:
+
+```{r}
+print(my_histogram)
+```
+
+And more importantly, you can save it to a file:
+
+```{r}
+ggsave(filename = "My-Histogram.pdf", my_histogram)
+```
+
+Some important options (for more look up the documentation for `ggsave`):
+
+```{r}
+ggsave(filename = "My-Histogram.pdf", my_histogram,
+       scale = 1, width = 7, height = 5, units = "in")
+```
+
+If you omit the ggplot2 object name in `ggsave` (`my_histogram` in this example) the last plot that you created will be saved.
+
+
+
+
+\newpage
+
+# Learning by example
+
+Below I will provide examples of several key graph types, and I will discuss many options to modify the graphs. Note that my particular emphasis and choice of topics reflects my particular tastes, in particular a desire to make each graph clean, simple, and easy to comprehend.
+
+
+
+## geom_point, axes, and color options
+
+The base plot:
+
+```{r}
+ggplot(DT, aes(x = income, y = spending)) +
+   geom_point()
+```
+
+Modify the **axis titles** using `xlab` and `ylab`, and add a plot title and subtitle using `ggtitle`:
+
+```{r}
+ggplot(DT, aes(x = income, y = spending)) +
+   geom_point() +
+   xlab("Income ($1,000)") +
+   ylab("Spending ($1,000)") +
+   ggtitle("Relationship between spending and income", subtitle = "Credit card customer data")
+```
+
+Change the **axis limits** (`limits`), the **major breaks** (`breaks`), and the **minor breaks** (`minor_breaks`):
+
+```{r}
+ggplot(DT, aes(x = income, y = spending)) +
+   geom_point() +
+   scale_x_continuous(limits = c(0, 200), breaks = seq(0, 200, 40),
+                      minor_breaks = seq(0, 200, 10)) +
+   scale_y_continuous("Spending ($1,000)", limits = c(0, 250))
+```
+
+Note that I restricted the original span of the x-axis and correspondingly omitted some data points. I chose equally spaced major breaks and minor breaks for the x-axis. Try to modify the numbers in `seq(...)` and examine the effects, or choose some arbitrary breaks, such as `breaks = c(0, 10, 100, 111, 199)`. I added a y-axis title directly within the `scale_y_continuous` layer and I expanded the y-axis (unnecessarily, for demonstration purposes only).
+
+Now I want to change the **color and appearance** of the points.
+
+```{r, fig.width = 5.175, fig.height = 3.45}
+ggplot(DT, aes(x = income, y = spending)) +
+   geom_point(shape = 21, color = "gray30", fill = "hotpink",
+              size = 2, stroke = 0.5, alpha = 0.5) +
+   theme_bw()
+```
+
+To understand these options, remove them, then add them one by one.
+
+`shape` allows me to choose specific shapes, including squares and triangles, and in particular it allows me to choose shapes that have an **outline (stroke) color** and a separate **fill color** (shapes 21-24). Then I specify the outline color (one of the many shades of gray), and a fill color (hot pink). The `size` refers to the overall symbol size, while `stroke` determines the outline width. `alpha` is a value between 0 and 1, and changes the transparency of the symbol (non-transparent symbols have the value 1). Setting the alpha is useful if there are many over-plotted symbols on a graph. The density of the data becomes more apparent when the symbols are transparent.
+
+Please consult the documentation for details on all the glorious options:
+
+<http://docs.ggplot2.org/current/vignettes/ggplot2-specs.html>
+
+And the R color names are here:
+
+<http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf>
+
+In the last example I didn't change the axes just to keep the example simple. Of course, by now you know that you can add more layers, such as the layer to change the axis titles, limits, and breaks, in addition to the options we just discussed. Try it out!
+
+
+
+
+\newpage
+
+## geom_histogram and geom_density
+
+The distribution of income for customers with an income of at most $200,000:
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income)) +
+   geom_histogram()
+```
+
+By default, ggplot2 creates a histogram with 30 bins, which is rarely an ideal choice. Instead, to make a publication-quality graph, you need to experiment with the `binwidth` option. Here I am using bins in $10k increments:
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income)) +
+   geom_histogram(binwidth = 10)
+```
+
+You can see that the bars are centered on x-axis values that are a multiple of 10 (0, 10, 20, ...). To make the bars cover a range such as 0-10 or 40-50 use the `center` option. Below, I'm moving the bars by 5 units to the right.
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income)) +
+   geom_histogram(binwidth = 10, center = 5)
+```
+
+Alternatively, to create the exact same histogram, you could provide the break points for the bins directly:
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income)) +
+   geom_histogram(breaks = seq(0, 200, 10))
+```
+
+To show frequencies, not counts, of the number of observations in each bin:
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income, y = (..count..)/sum(..count..))) +
+   geom_histogram(binwidth = 10, center = 5)
+```
+
+Now let's add color and line options and let's change the axes:
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income, y = (..count..)/sum(..count..))) +
+   geom_histogram(binwidth = 10, center = 5,
+                  color = "gray30", fill = "lightblue1", alpha = 0.8) +
+   scale_x_continuous("Income ($1,000)", limits = c(0, 200),
+                      breaks = seq(0, 200, 40), minor_breaks = seq(0, 200, 10)) +
+   scale_y_continuous("Frequency", limits = c(0, 0.16), breaks = seq(0, 0.15, 0.02)) +
+   theme_bw()
+```
+
+All of these options should be familiar from the previous section. Note that I set the `alpha` value, although often this is not useful when creating histograms or bar graphs, unless you would like to mute the intensity of a fill color.
+
+Finally, to stack the data for different groups in the data, such as customers who did or did not default:
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income, y = (..count..)/sum(..count..), fill = default)) +
+   geom_histogram(binwidth = 10, center = 5) +
+   ylab("Frequency")
+```
+
+To compare distributions you can also use a density layer. Now the distributions are not stacked, but instead displayed separately (the `alpha` value is crucial now to see the outlines of both densities). Also, the areas under each curve are normalized to 1.
+
+```{r}
+ggplot(DT[income <= 200], aes(x = income, fill = default, color = default)) +
+   geom_density(alpha = 0.25) +
+   theme_bw()
+```
+
+For completeness, you may want to check what you get when you draw a frequency polygon (`geom_freqpoly`). Not my favorite, but it's another option.
+
+
+
+\newpage
+
+## Line plots/graphs --- geom_line
+
+You can get many economic data series from [FRED](https://fred.stlouisfed.org) at Federal Reserve Bank of St. Louis. Browse the website and explore! It's easy to load FRED data in R using the quantmod package. For example, [UNRATE](https://fred.stlouisfed.org/series/UNRATE) is the variable name for the seasonally adjusted, monthly civilian unemployment rate in the U.S. To import UNRATE in R using quantmod:
+
+```{r, results = "hide", warning = FALSE}
+library(quantmod)
+
+# Get data UNRATE from FRED, convert to a data.table, and change column names
+getSymbols("UNRATE", src = "FRED")
+DT_u = as.data.table(UNRATE)
+setnames(DT_u, c("index", "UNRATE"), c("date", "unemployment_rate"))
+
+# Convert date from string to date, and create a year column
+DT_u[, date := as.Date(date)]
+DT_u[, year := year(date)]
+```
+
+Note (as an aside) that quantmod gives you access to many other data, especially financial time series data. For example, 
+`getSymbols("GOOGL")` gives you access to daily Google stock market data.
+
+Let's use a line graph to display the evolution of unemployment in the U.S.:
+
+```{r}
+ggplot(DT_u, aes(x = date, y = unemployment_rate)) +
+   geom_line(color = "deepskyblue2", linetype = "solid", size = 0.6) +
+   theme_bw()
+```
+
+There are several other line types, such as `"dashed"`---see the aesthetics reference in ggplot2.
+
+Now let's aggregate to the yearly level by taking the mean over the monthly unemployment rates.
+
+```{r}
+DT_u_year = DT_u[, .(unemployment_rate = mean(unemployment_rate)), by = year]
+
+ggplot(DT_u_year, aes(x = year, y = unemployment_rate)) +
+   geom_line(color = "gray80", size = 0.5) +
+   geom_point(shape = 21, color = "gray30", fill = "deepskyblue2", size = 1.5, stroke = 0.5) +
+   theme_bw()
+```
+
+Note that I first added a line plot layer using a light gray color. Then, to highlight the data points that are more sparse at the yearly than at the monthly level I added another layer to plot the data points on top of the lines.
+
+Especially in a time-series graph we may want to visually highlight specific time periods. This can be achieved using the `annotate` layer added to the graph below. `"rect"` indicates to draw a rectangle, and the x and y coordinates provide the outline of the rectangle (`Inf` is *infinity*, i.e. no bound). Setting the `alpha` option that controls the transparency level is highly recommended. Also note the order of the layers: Had we included the `annotate` layer at the bottom, the shaded rectangle would partially cover the lines and points.
+
+```{r}
+ggplot(DT_u_year, aes(x = year, y = unemployment_rate)) +
+   annotate("rect", xmin = 1980, xmax = 1990, ymin = 0, ymax = Inf,
+            fill = "violet", alpha = 0.2) +
+   geom_line(color = "gray80", size = 0.5) +
+   geom_point(shape = 21, color = "gray30", fill = "deepskyblue2", size = 1.5, stroke = 0.5) +
+   theme_bw()
+```
+
+
+
+\newpage
+
+## Distributions and data summaries on a discrete axis
+
+Let's bin the customers into 5 income groups, where group 1 contains the (approximately) 20 percent of customers with the lowest incomes, etc. ggplot has a function to easily create the bins, called `cut_number` (check `cut_interval` for equally spaced group limits).
+
+```{r, results = "hide"}
+DT[, income_group := cut_number(income, n = 5)]
+```
+
+Now let's create box plots of spending, separately for each income group:
+
+```{r}
+ggplot(DT, aes(x = income_group, y = spending)) +
+   geom_boxplot()
+```
+
+An alternative to a box plot is a violin plot:
+
+```{r}
+ggplot(DT, aes(x = income_group, y = spending)) +
+   geom_violin()
+```
+
+Box plots take some of the usual options. However, we now have a discrete x-axis and correspondingly a modified axis layer. Note that this layer allows us to change the labels (names) for each group.
+
+```{r}
+ggplot(DT, aes(x = income_group, y = spending)) +
+   geom_boxplot(color = "gray40", fill = "violetred2", size = 0.5, alpha = 0.8) +
+   scale_x_discrete("Income group",
+                    labels = c("1-20 %", "21-40 %", "41-60 %", "61-80 %", "81-100 %")) +
+   theme_bw()
+```
+
+Let's take a different approach, and calculate the mean of spending in each income group. Also, let's calculate the limits of an interval that covers 90 percent of all observations in each group separately.
+
+```{r, results = "hide"}
+DT_summary = DT[, .(spending_mean = mean(spending),
+                    spending_5    = quantile(spending, probs = 0.05),
+                    spending_95   = quantile(spending, probs = 0.95)), by = income_group]
+```
+
+Now let's display the mean and the 90 percent interval of spending for each income group:
+
+```{r}
+ggplot(DT_summary, aes(x = income_group, y = spending_mean)) +
+   geom_errorbar(aes(ymin = spending_5, ymax = spending_95),
+                 color = "deepskyblue2", size = 0.6, width = 0.1) +
+   geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+   theme_bw()
+```
+
+Note that I added an aesthetic mapping inside the `geom_errorbar` layer to specify the lower and upper bounds of the intervals. Also, the `width` argument applies to the width of the end caps.
+
+If you don't want the end caps that come with the `geom_errorbar` layer, use
+
+```{r, eval = FALSE}
+geom_linerange(aes(ymin = spending_5, ymax = spending_95),
+               color = "deepskyblue2", size = 0.6)
+```
+
+Try it!
+
+Finally, the most boring of all graphs:
+
+```{r}
+ggplot(DT, aes(x = income_group)) +
+   geom_bar()
+```
+
+By default, the bars represent a count of the number of observations. By design, approximately 20 percent of all observations are in each group.
+
+Let's show a bar graph that highlights default and non-default observations:
+
+```{r}
+ggplot(DT, aes(x = income_group)) +
+   geom_bar(aes(fill = default))
+```
+
+
+
+\newpage
+
+## More on facetting
+
+Let's compare the distribution of customer spending by income_group and default status.
+
+First, let's only look at spending by income group:
+
+```{r}
+ggplot(DT, aes(x = spending)) +
+   geom_histogram() +
+   facet_wrap(~ income_group) +
+   theme_bw()
+```
+
+To squeeze all individual panels into columns or rows:
+
+```{r}
+ggplot(DT, aes(x = spending)) +
+   geom_histogram() +
+   facet_grid(income_group ~ .) +
+   theme_bw()
+```
+
+
+```{r}
+ggplot(DT, aes(x = spending)) +
+   geom_histogram() +
+   facet_grid(. ~ income_group) +
+   theme_bw()
+```
+
+And finally, to create a matrix with income groups in rows and default status in columns:
+
+```{r}
+ggplot(DT, aes(x = spending)) +
+   geom_histogram() +
+   facet_grid(income_group ~ default) +
+   theme_bw()
+```
+
+We can see that customers who defaulted had slightly higher spending levels than customers who did not default within each of the income groups.
+
+
+
+
+\newpage
+
+## Adding lines to graphs
+
+Let's work with the plot of spending versus income that we created before:
+
+```{r}
+graph = ggplot(DT, aes(x = income, y = spending)) +
+           geom_point(shape = 21, color = "gray30", fill = "hotpink",
+                      size = 2, stroke = 0.5, alpha = 0.5) +
+           theme_bw()
+```
+
+First, let's add a vertical line representing the median of income to the graph. We do this using the `geom_vline` layer:
+
+```{r}
+graph + geom_vline(xintercept = median(DT$income), color = "midnightblue")
+```
+
+Second, a horizontal line at the mean spending level using the `geom_hline` layer:
+
+```{r}
+graph + geom_hline(yintercept = mean(DT$spending), color = "midnightblue")
+```
+
+Third, we can create more general lines using the `geom_abline` layer. A general line is defined by a slope and an intercept. For example, if we regress spending on income in our example, we get an intercept of 14.539 and a slope of 0.727. Let's add the corresponding regression line to the plot:
+
+```{r}
+graph + geom_abline(intercept = 14.539, slope = 0.727, color = "midnightblue")
+```
+
