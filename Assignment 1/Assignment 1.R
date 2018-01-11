@@ -104,5 +104,63 @@ for (cat in unique(purchases_category$category))
     purchases_category[purchases_category$category == cat][1]$purchvol_percap
 }
 
+ggplot(purchases_category, aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~category, nrow=2)
+
+# Brand-level analysis --------------------------------------------------------
+
+# merge brand identifier with purchase data
+purchases = merge(purchases, products[, .(upc, upc_ver_uc, brand_descr)])
+
+brand_summary = purchases[, .(spend = sum(total_price_paid - coupon_value)),
+                          by = .(category, brand_descr)]
+brand_summary[, rank := frankv(spend, order = -1), by = category]
+
+# brand ranks information
+purchases = merge(purchases, brand_summary[, .(category, brand_descr, rank)], 
+                  by=c("category", "brand_descr"))
+
+# separate by 4 categories and keep only top 4 brands
+brands_by_cat_list = vector(mode="list", length=4)
+names(brands_by_cat_list) = unique(purchases$category)
+for (cat in unique(purchases$category))
+{
+  cat_brand = purchases[category == cat,
+                        .(spend = sum(total_price_paid - coupon_value),
+                          purchase_volume = sum(volume),
+                          rank = head(rank, 1),
+                          no_households = head(no_households, 1)),
+                        keyby = .(brand_descr, year)]
+  cat_brand = cat_brand[order(rank)]
+  cat_brand = cat_brand[rank <= 4]
+  
+  # calculate per capital data and normalize
+  cat_brand[, spend_percap := spend/no_households]
+  cat_brand[, purchvol_percap := purchase_volume/no_households]
+  
+  cat_brand[, purchvol_percap_norm := 0]
+  for (brd in unique(cat_brand$brand_descr))
+  {
+    cat_brand[cat_brand$brand_descr == brd]$purchvol_percap_norm =
+      cat_brand[cat_brand$brand_descr == brd]$purchvol_percap /
+      cat_brand[cat_brand$brand_descr == brd][1]$purchvol_percap
+  }
+  
+  brands_by_cat_list[cat] = list(cat_brand)
+}
+
+# plot evolution of brand volume
+ggplot(brands_by_cat_list$'Bottled Water', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+
+ggplot(brands_by_cat_list$'CSD', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+
+ggplot(brands_by_cat_list$'Diet CSD', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+
+ggplot(brands_by_cat_list$'Other', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+
 
 
