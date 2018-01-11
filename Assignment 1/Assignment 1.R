@@ -56,29 +56,53 @@ products[, category := ifelse(product_module_code == 1484, "CSD",
 head(products[,c("category", "product_module_descr")], 50)
 
 # merge category variable with purchase data
-purchasesCat = merge(purchases, products[, .(upc, upc_ver_uc, category)])
+purchases = merge(purchases, products[, .(upc, upc_ver_uc, category)])
 
 # merge equivalent unit info with purchase data
-purchasesUnits = merge(purchasesCat, products[, .(upc, upc_ver_uc, size1_units, 
+purchases = merge(purchases, products[, .(upc, upc_ver_uc, size1_units, 
                                                   size1_amount, multi)])
 
 # number of observations by unit of measurement
-nrow(purchasesUnits[purchasesUnits$size1_units == "OZ"])
-nrow(purchasesUnits[purchasesUnits$size1_units == "QT"])
-nrow(purchasesUnits[purchasesUnits$size1_units == "CT"])
+nrow(purchases[purchases$size1_units == "OZ"])
+nrow(purchases[purchases$size1_units == "QT"])
+nrow(purchases[purchases$size1_units == "CT"])
 
 # ignore counts and remove corresponding data
-purchasesUnits = purchasesUnits[size1_units != 'CT']
+purchases = purchases[size1_units != 'CT']
 
 # convert to common volume measure in gallons
-purchasesUnits[, volume := ifelse(size1_units == 'OZ', multi*size1_amount/128,
+purchases[, volume := ifelse(size1_units == 'OZ', multi*size1_amount/128,
                                   multi*size1_amount/4)]
 
 # number of households in the data, then by year
-purchasesUnits[, no_households := length(unique(household_code)), by = year]
-households_DT = purchasesUnits[, head(.SD, 1), by = year,
+purchases[, no_households := length(unique(household_code)), by = year]
+households_DT = purchases[, head(.SD, 1), by = year,
                                .SDcols = c("no_households")]
 households_DT[order(year)]
 
 # Category-level analysis -----------------------------------------------------
+
+purchases_category = purchases[, .(spend = sum(total_price_paid - coupon_value),
+                                   purchase_volume = sum(volume),
+                                   no_households = head(no_households, 1)),
+                               keyby = .(category, year)]
+purchases_category[, spend_percap := spend/no_households]
+purchases_category[, purchvol_percap := purchase_volume/no_households]
+
+# graph evolution of yearly per capital purchase volume
+library(ggplot2)
+
+ggplot(purchases_category, aes(as.factor(year), purchvol_percap)) +
+  geom_col() + facet_wrap(~category, nrow=2)
+
+# express data normalized by 2004 values
+purchases_category[, purchvol_percap_norm := 0]
+for (cat in unique(purchases_category$category))
+{
+  purchases_category[purchases_category$category == cat]$purchvol_percap_norm =
+    purchases_category[purchases_category$category == cat]$purchvol_percap /
+    purchases_category[purchases_category$category == cat][1]$purchvol_percap
+}
+
+
 
