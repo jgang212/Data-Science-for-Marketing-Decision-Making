@@ -56,5 +56,29 @@ products[, category := ifelse(product_module_code == 1484, "CSD",
 head(products[,c("category", "product_module_descr")], 50)
 
 # merge category variable with purchase data
-purchasesTest = merge(purchases, products[, .(upc, upc_ver_uc, category)])
+purchasesCat = merge(purchases, products[, .(upc, upc_ver_uc, category)])
+
+# merge equivalent unit info with purchase data
+purchasesUnits = merge(purchasesCat, products[, .(upc, upc_ver_uc, size1_units, 
+                                                  size1_amount, multi)])
+
+# number of observations by unit of measurement
+nrow(purchasesUnits[purchasesUnits$size1_units == "OZ"])
+nrow(purchasesUnits[purchasesUnits$size1_units == "QT"])
+nrow(purchasesUnits[purchasesUnits$size1_units == "CT"])
+
+# ignore counts and remove corresponding data
+purchasesUnits = purchasesUnits[size1_units != 'CT']
+
+# convert to common volume measure in gallons
+purchasesUnits[, volume := ifelse(size1_units == 'OZ', multi*size1_amount/128,
+                                  multi*size1_amount/4)]
+
+# number of households in the data, then by year
+purchasesUnits[, no_households := length(unique(household_code)), by = year]
+households_DT = purchasesUnits[, head(.SD, 1), by = year,
+                               .SDcols = c("no_households")]
+households_DT[order(year)]
+
+# Category-level analysis -----------------------------------------------------
 
