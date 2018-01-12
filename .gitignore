@@ -1,4 +1,6 @@
 *.pdf
+*.html
+*.docx
 *.zip
 *.RData
 *.Rhistory

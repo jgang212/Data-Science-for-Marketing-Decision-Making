@@ -9,7 +9,7 @@
 
 
 
-# Loading the data ------------------------------------------------------------
+# Data ------------------------------------------------------------------------
 
 library(bit64)
 library(data.table)
@@ -21,7 +21,7 @@ products_file = "products_beverages.RData"
 load(purchases_file)
 load(products_file)
 
-# Inspecting the data ---------------------------------------------------------
+# Variable description --------------------------------------------------------
 
 head(purchases)
 head(products)
@@ -32,28 +32,25 @@ module_DT = products[, head(.SD, 1), by = product_module_code,
                                  "product_group_descr", "department_descr")]
 module_DT[order(product_group_descr)]
 
-# over 9000 brands
-brand_DT = products[, head(.SD, 1), by = brand_code_uc,
-                     .SDcols = c("brand_descr")]
-brand_DT[order(brand_code_uc)]
-
 # Prepare the data for the analysis -------------------------------------------
 
 # convert purchase date to year (rather than use panel_year)
 purchases[, year := year(purchase_date)]
-head(purchases)
 
 # remove 2003 observations
-nrow(purchases)
+print(paste("Total purchases:", nrow(purchases)))
 purchases = purchases[year != '2003']
-nrow(purchases)
+print(paste("Total purchases excluding 2003:", nrow(purchases)))
 
-# category variable (default = "Other")
+# category variable (default = "Other"), codes from module_DT table above
 products[, category := ifelse(product_module_code == 1484, "CSD", 
                        ifelse(product_module_code == 1553, "Diet CSD", 
                        ifelse(product_module_code == 1487, "Bottled Water",
                               "Other")))]
-head(products[,c("category", "product_module_descr")], 50)
+print(paste("CSD:", nrow(products[products$category == "CSD"])))
+print(paste("Diet CSD:", nrow(products[products$category == "Diet CSD"])))
+print(paste("Bottled Water:", nrow(products[products$category == "Bottled Water"])))
+print(paste("Other:", nrow(products[products$category == "Other"])))
 
 # merge category variable with purchase data
 purchases = merge(purchases, products[, .(upc, upc_ver_uc, category)])
@@ -63,9 +60,9 @@ purchases = merge(purchases, products[, .(upc, upc_ver_uc, size1_units,
                                                   size1_amount, multi)])
 
 # number of observations by unit of measurement
-nrow(purchases[purchases$size1_units == "OZ"])
-nrow(purchases[purchases$size1_units == "QT"])
-nrow(purchases[purchases$size1_units == "CT"])
+print(paste("OZ:",nrow(purchases[purchases$size1_units == "OZ"])))
+print(paste("QT:",nrow(purchases[purchases$size1_units == "QT"])))
+print(paste("CT:",nrow(purchases[purchases$size1_units == "CT"])))
 
 # ignore counts and remove corresponding data
 purchases = purchases[size1_units != 'CT']
@@ -82,6 +79,7 @@ households_DT[order(year)]
 
 # Category-level analysis -----------------------------------------------------
 
+# total and per capital metrics
 purchases_category = purchases[, .(spend = sum(total_price_paid - coupon_value),
                                    purchase_volume = sum(volume),
                                    no_households = head(no_households, 1)),
@@ -95,7 +93,7 @@ library(ggplot2)
 ggplot(purchases_category, aes(as.factor(year), purchvol_percap)) +
   geom_col() + facet_wrap(~category, nrow=2)
 
-# express data normalized by 2004 values
+# express data normalized by 2004 values and graph
 purchases_category[, purchvol_percap_norm := 0]
 for (cat in unique(purchases_category$category))
 {
@@ -112,6 +110,7 @@ ggplot(purchases_category, aes(as.factor(year), purchvol_percap_norm)) +
 # merge brand identifier with purchase data
 purchases = merge(purchases, products[, .(upc, upc_ver_uc, brand_descr)])
 
+# rank brands by total dollar spend by category
 brand_summary = purchases[, .(spend = sum(total_price_paid - coupon_value)),
                           by = .(category, brand_descr)]
 brand_summary[, rank := frankv(spend, order = -1), by = category]

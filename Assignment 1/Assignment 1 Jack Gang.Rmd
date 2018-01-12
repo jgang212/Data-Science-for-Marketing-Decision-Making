@@ -1,0 +1,259 @@
+---
+title: "Analysis of Household Buying Behavior: Carbonated Soft Drinks and Other Beverages"
+author: "Jack Gang"
+date: "1/17/2017"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+
+
+We will perform an analysis of category buying and consumption behavior of beverages (not including alcohol or dairy), with a particular emphasis on sodas (carbonated soft drinks/CSD's). Sodas have been the subject of an intense debate linked to public health concerns, and one or two cent-per-ounce taxes have recently been passed in San Francisco, Cook County (although the tax was repealed in 2017), Philadelphia, Boulder, and other cities. Changes in buying behavior due to health concerns present challenges to the beverage manufacturers, but also opportunities if consumers are shifting their consumption to healthier substitutes.
+
+
+
+## Data
+
+We first load the data for the analysis:
+
+```{r}
+library(bit64)
+library(data.table)
+
+purchases_file = "purchases_beverages.RData"
+products_file = "products_beverages.RData"
+
+# assumes data in same directory as R script = working directory
+load(purchases_file)
+load(products_file)
+```
+
+## Variable description
+
+After loading the data, we first inspected the `purchases` and `products` tables to understand them better:
+
+```{r}
+head(purchases)
+head(products)
+```
+
+We then created a table `module_DT` that lists all the product module codes, product module descriptions, and group descriptions in the data:
+
+```{r}
+# table that lists all departments, product groups, and product modules
+module_DT = products[, head(.SD, 1), by = product_module_code,
+                     .SDcols = c("product_module_descr", 
+                                 "product_group_descr", "department_descr")]
+module_DT[order(product_group_descr)]
+```
+
+## Prepare the data for the analysis
+
+In order to better prepare the data for analysis, we first created a new `year` variable because the `panel_year` variable in `purchases` does not exactly correspond to the calendar year:
+
+```{r}
+# convert purchase date to year (rather than use panel_year)
+purchases[, year := year(purchase_date)]
+```
+
+We then removed the 2003 observations that "slipped" into the data set because the purchases are recorded for households in the 2004 `panel_year`:
+
+```{r}
+# remove 2003 observations
+print(paste("Total purchases:", nrow(purchases)))
+purchases = purchases[year != '2003']
+print(paste("Total purchases excluding 2003:", nrow(purchases)))
+```
+
+#### Define categories
+
+In the analysis we wanted to distinguish between carbonated soft drinks (CSD's), diet (low-calorie) CSD's, bottled water, and a category including all other beverages (juices, ...). Hence, we created a new `category` variable that allowed us classify the beverage purchase observations. We also documented the number of observations (products) that belonged to each category:
+
+```{r}
+# category variable (default = "Other"), codes from module_DT table above
+products[, category := ifelse(product_module_code == 1484, "CSD", 
+                       ifelse(product_module_code == 1553, "Diet CSD", 
+                       ifelse(product_module_code == 1487, "Bottled Water",
+                              "Other")))]
+print(paste("CSD:", nrow(products[products$category == "CSD"])))
+print(paste("Diet CSD:", nrow(products[products$category == "Diet CSD"])))
+print(paste("Bottled Water:", nrow(products[products$category == "Bottled Water"])))
+print(paste("Other:", nrow(products[products$category == "Other"])))
+```
+
+Then we merged the category variable with the purchase data:
+
+```{r}
+# merge category variable with purchase data
+purchases = merge(purchases, products[, .(upc, upc_ver_uc, category)])
+```
+
+#### Volume in equivalent units
+
+To see the volume in equivalent units, we first merged the purchase data with the following product level information: `size1_units`, `size1_amount`, and `multi`:
+
+```{r}
+# merge equivalent unit info with purchase data
+purchases = merge(purchases, products[, .(upc, upc_ver_uc, size1_units, 
+                                                  size1_amount, multi)])
+```
+
+Since product volume for beverages is typically measured in ounces (`OZ`), quarts (`QT`), and counts (`CT`), we need to normalize this. First, we documented the number of observations by unit of measurement. We cannot accurately measure counts, so we then removed all of the corresponding data that is measured in counts. Lastly, we converted all of the volumes to a common value of gallons, factoring multi-packs:
+
+```{r}
+# number of observations by unit of measurement
+print(paste("OZ:",nrow(purchases[purchases$size1_units == "OZ"])))
+print(paste("QT:",nrow(purchases[purchases$size1_units == "QT"])))
+print(paste("CT:",nrow(purchases[purchases$size1_units == "CT"])))
+
+# ignore counts and remove corresponding data
+purchases = purchases[size1_units != 'CT']
+
+# convert to common volume measure in gallons
+purchases[, volume := ifelse(size1_units == 'OZ', multi*size1_amount/128,
+                                  multi*size1_amount/4)]
+```
+
+#### Number of households in the data
+
+We calculated the number of households in the data and created a data table with the data:
+
+```{r}
+# number of households in the data, then by year
+purchases[, no_households := length(unique(household_code)), by = year]
+households_DT = purchases[, head(.SD, 1), by = year,
+                               .SDcols = c("no_households")]
+households_DT[order(year)]
+```
+
+## Category-level analysis
+
+In order to analyze the evolution of purchases and consumption in the 4 product categories, we first calculated total and per capital consumption metrics. First, we created the total dollar spend and the total purchase volume for each category/year combination. Then we calculated per capita spend and purchase volume (in gallons) for each category separately:
+
+```{r}
+# total and per capital metrics
+purchases_category = purchases[, .(spend = sum(total_price_paid - coupon_value),
+                                   purchase_volume = sum(volume),
+                                   no_households = head(no_households, 1)),
+                               keyby = .(category, year)]
+purchases_category[, spend_percap := spend/no_households]
+purchases_category[, purchvol_percap := purchase_volume/no_households]
+```
+
+The following is a graph of the evolution of the yearly per capital purchase volume for all four categories:
+
+```{r}
+# graph evolution of yearly per capital purchase volume
+library(ggplot2)
+
+ggplot(purchases_category, aes(as.factor(year), purchvol_percap)) +
+  geom_col() + facet_wrap(~category, nrow=2)
+```
+
+It makes more sense to look at this evolution after normalizing the data, since it allowed us to compare the consumption series in each category directly in percentage terms. We expressed the purchase/consumption data as multiples of the 2004 values, such that per capita volume takes the value of 1.0 in all categories in 2004. Again, a graph is shown to display this evolution:
+
+```{r}
+# express data normalized by 2004 values and graph
+purchases_category[, purchvol_percap_norm := 0]
+for (cat in unique(purchases_category$category))
+{
+  purchases_category[purchases_category$category == cat]$purchvol_percap_norm =
+    purchases_category[purchases_category$category == cat]$purchvol_percap /
+    purchases_category[purchases_category$category == cat][1]$purchvol_percap
+}
+
+ggplot(purchases_category, aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~category, nrow=2)
+```
+
+As we can see in the graph, bottled water consumption has increased over 50% since 2004, and this has largely replaced consumption in the other 3 categories of CSD's, diet CSD's, and all other beverages. CSD's took the biggest hit with a 31% decrease in consumption over this time, whereas Diet CSD's decreased by 21% and other beverages decreased by only 17%. This could be due to a move toward "healthier" consumption, as many of the beverages in the other category are juices and other non-water drinks that are healthier than the traditional carbonated soda.
+
+## Brand-level analysis
+
+Aside from just looking at categories, we wanted to also drill in on the evolution of consumption for some of the largest brands in each beverage category. First, we merged the brand identifier `brand_descr` with the purchase data:
+
+```{r}
+# merge brand identifier with purchase data
+purchases = merge(purchases, products[, .(upc, upc_ver_uc, brand_descr)])
+```
+
+Then we ranked the brands by total dollar spend in each category separately:
+
+```{r}
+# rank brands by total dollar spend by category
+brand_summary = purchases[, .(spend = sum(total_price_paid - coupon_value)),
+                          by = .(category, brand_descr)]
+brand_summary[, rank := frankv(spend, order = -1), by = category]
+```
+
+Lastly, we merged the brand ranks in the `brand_summary` table with the `purchases` information. Similarly to what we did with categories, we first aggregated the data to the brand level. Then we calculated the per capita spending and volume, and normalized the per capita variables to 1.0 in 2004. Finally, we plotted the evolution of brand volume for the top four brands, separately for the CSD, diet CSD, and bottled water categories:
+
+```{r}
+# brand ranks information
+purchases = merge(purchases, brand_summary[, .(category, brand_descr, rank)], 
+                  by=c("category", "brand_descr"))
+
+# separate by 4 categories and keep only top 4 brands
+brands_by_cat_list = vector(mode="list", length=4)
+names(brands_by_cat_list) = unique(purchases$category)
+for (cat in unique(purchases$category))
+{
+  cat_brand = purchases[category == cat,
+                        .(spend = sum(total_price_paid - coupon_value),
+                          purchase_volume = sum(volume),
+                          rank = head(rank, 1),
+                          no_households = head(no_households, 1)),
+                        keyby = .(brand_descr, year)]
+  cat_brand = cat_brand[order(rank)]
+  cat_brand = cat_brand[rank <= 4]
+  
+  # calculate per capital data and normalize
+  cat_brand[, spend_percap := spend/no_households]
+  cat_brand[, purchvol_percap := purchase_volume/no_households]
+  
+  cat_brand[, purchvol_percap_norm := 0]
+  for (brd in unique(cat_brand$brand_descr))
+  {
+    cat_brand[cat_brand$brand_descr == brd]$purchvol_percap_norm =
+      cat_brand[cat_brand$brand_descr == brd]$purchvol_percap /
+      cat_brand[cat_brand$brand_descr == brd][1]$purchvol_percap
+  }
+  
+  brands_by_cat_list[cat] = list(cat_brand)
+}
+
+# plot evolution of brand volume
+ggplot(brands_by_cat_list$'Bottled Water', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+
+ggplot(brands_by_cat_list$'CSD', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+
+ggplot(brands_by_cat_list$'Diet CSD', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+
+ggplot(brands_by_cat_list$'Other', aes(as.factor(year), purchvol_percap_norm)) +
+  geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+```
+
+## Discussion
+
+As we can see in the category graph, bottled water consumption has increased over 50% since 2004, and this has largely replaced consumption in the other 3 categories of CSD's, diet CSD's, and all other beverages. CSD's took the biggest hit with a 31% decrease in consumption over this time, whereas Diet CSD's decreased by 21% and other beverages decreased by only 17%. 
+
+Looking at the brands, the only top 4 bottled water brand that decreased in consumption was Propel, whereas the other three brands increased greatly, with Glaceau Vitamin Water increasing up to 1500% in 2008 before finishing at over 600% in 2014. For regular CSD's, all of the top 4 brands were down, with Pepsi doing worse than Coca-Cola. Mountain Dew consumption only decreased 7% over this period, and the control brand did the worst. In the Diet CSD's space, Pepsi again did worse than Coca-Cola, but the diet caffeine-free ersion of Coca-Cola had the largest decrease as the top brand. The control brand did the "best" out of the top 4, decreasing 18% over this period. Lastly, the "Other" category's top 4 brands had some more variance. Tropicana had a huge consumption decrease of 60%, whereas Ocean Spray held steady with only a 1% decrease.
+
+All of these results seem to point toward a move toward "healthier" consumption. The healthiest beverage, bottled water, enjoyed gains whereas the other categories suffered consumption decreases in order of perceived healthiness (many of the beverages in the other category are juices and other non-water drinks that are "healthier"" than the traditional carbonated soda). This seems to be further supported by the evolution of consumption of the top 4 "Other" brands. Ocean Spray is produced by an agricultural cooperative of growers, making it the most natural of juices, whereas Minute Maid and Tropicana (produced by Coca-Cola and Pepsi, respectively) decreased in consumption.
+
+Another possible phenomenon can be gleaned from the CSD and Diet CSD evolution graphs. Mountain Dew, known to have high caffeine content, held more or less steady over this period whereas caffeine-free diet Coke performed the worst out of the top 4 Diet CSD's. This could point to the stickiness of customers who want caffeine in their CSD drinks. In other words, if a customer drank CSD for the caffeine, he did not change his behavior much over these 11 years. On the other hand, if a customer wanted to be "healthy" and drink caffeine-free CSD's, he switched over to a non-CSD drink or bottled water to be even healthier.
+
