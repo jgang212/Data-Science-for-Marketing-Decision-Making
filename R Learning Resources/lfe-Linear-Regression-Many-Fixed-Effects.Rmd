@@ -1,0 +1,207 @@
+---
+title: "lfe: Linear Regression With Many Fixed Effects"
+author: "Günter J. Hitsch"
+date: "January 2018"
+output: pdf_document
+urlcolor: blue
+graphics: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE,
+                      fig.width = 4.5, fig.height = 3, fig.align = "right")
+```
+
+
+
+
+## Why use lfe?
+
+The lfe package estimates linear regression models with a large number of fixed effects
+
+In the standard `lm` function we can estimate fixed effects as dummy variables. For example, if `id` is the identifier of a store and we want to estimate the effect of `x` on `y` while controlling for store fixed effects, then we estimate the regression:
+
+```{r, eval = FALSE}
+fit = lm(y ~ x + factor(id), data = DT)
+```
+
+However, for a large number of fixed effects the `lm` function becomes inefficient and slow and eventually breaks down. As a rule of thumb, I would not use `lm` with more than about 500 fixed effects.
+
+lfe is a great alternative to `lm`. It is designed to efficiently estimate regression models even with tens of thousands or more fixed effects.
+
+
+
+## Documentation
+
+I am not aware of any good tutorial but usage of the package is straightforward. The official documentation is here:
+
+<https://cran.r-project.org/web/packages/lfe/lfe.pdf>
+
+
+
+\newpage
+
+## Usage example
+
+Let's simulate a data set with price and quantity observations in a panel data set with many stores and weeks. Experiment with the settings for the number of stores and weeks and check how quickly the lfm package can obtain estimates!
+
+```{r, results = "hide"}
+library(data.table)
+library(lfe)
+
+# Settings: Number of stores and weeks
+N_stores = 200
+N_weeks  = 100
+
+# Settings: Regression coefficients, fixed effects, and error term standard deviation
+price_effect  = -2.5
+store_effects = 30 + 4*round(sin(1:N_stores), 1)
+week_effects  = round((0:(N_weeks-1))*(2/(N_weeks-1)), 1)
+error_sd      = 1.5
+
+# Total number of observations
+N = N_stores*N_weeks 
+
+set.seed(1776)
+DT = data.table(store_id = as.integer(rep(1:N_stores, each = N_weeks)),
+                week     = as.integer(rep(1:N_weeks, times = N_stores)),
+                price    = round(runif(N, min = 4, max = 10), digits = 1)
+               )
+
+# Purchase quantity simulation
+DT[, quantity := price_effect*price + store_effects[store_id] + week_effects[week]
+                 + round(rnorm(N, sd = error_sd), 1)]
+```
+
+```{r}
+head(DT)
+```
+
+
+
+\newpage
+
+#### Estimation
+
+Now estimate the regression model using the `felm` (fixed-effects linear model) function:
+
+```{r}
+fit = felm(quantity ~ price | store_id + week, data = DT)
+```
+
+Note the syntax to add both store and week fixed effects to the regression formula.
+
+The regression output will not include (fortunately!) the fixed effect estimates:
+
+```{r}
+summary(fit)
+```
+
+
+
+\newpage
+
+#### Obtain the fixed effects estimates
+
+If you need to obtain the fixed effect estimates, use `getfe`. The results are stored in a data frame.
+
+```{r}
+FE = getfe(fit, se = TRUE)
+
+head(FE)
+```
+
+
+#### Plot the estimated vs. the true fixed effects
+
+True and estimated store fixed effects:
+
+```{r}
+library(ggplot2)
+setDT(FE)          # Convert FE to a data.table
+
+ggplot(FE[fe == "store_id"], aes(x = store_effects, y = effect)) +
+   geom_point()
+```
+
+True and estimated week fixed effects:
+
+```{r}
+ggplot(FE[fe == "week"], aes(x = week_effects, y = effect)) +
+   geom_point()
+```
+
+
+
+\newpage
+
+#### Prediction
+
+The lfe package does not contain a `predict` method that works with `felm`. Hence we create the function `predict.felm` below. The script `predict.felm.R` contains the same code, and you can source the script whenever you need to predict using the output from a lfe regression.
+
+```{r}
+predict.felm <- function(fit, newdata) {
+   
+   if (class(fit) != "felm") stop("'fit' is not a felm object")
+   if (!("data.frame" %in% class(newdata))) stop("'newdata' must be a data.frame or data.table")
+
+   setDT(newdata)
+   uses_FEs = length(fit$fe) > 0
+
+   # Predict output based on estimated coefficients, not inclucing fixed effects
+   formula_string = as.character(fit$terms)
+   if (uses_FEs) original_formula = paste("~ 0 +", formula_string[2])
+   else original_formula = paste("~ ", formula_string[2])
+   X = model.matrix(formula(original_formula), newdata)
+
+   # Only retain columns in X if among the original inputs
+   X = X[, rownames(fit$coefficients)]
+
+   y = as.vector(X %*% fit$coefficients)
+
+   # Add fixed effect values to prediction
+   if (uses_FEs) {
+      FE = as.data.table(getfe(fit))
+      cols = c("fe", "idx")
+      FE[, (cols) := lapply(.SD, as.character), .SDcols = cols]
+
+      for (name in unique(FE$fe)) {
+         fe_DT = newdata[, name, with = FALSE]
+         fe_DT[, obs_no := .I]
+         setnames(fe_DT, name, "idx")
+         fe_DT[, idx := as.character(idx)]
+         
+         fe_DT = merge(fe_DT, FE[fe == name, .(idx, effect)], by = "idx")
+         fe_DT = fe_DT[order(obs_no)]
+         
+         y = y + as.vector(fe_DT$effect)
+      }
+   }
+   
+   return(y)
+}
+```
+
+\bigskip
+
+Let's test it:
+
+```{r}
+predicted_quantity = predict.felm(fit, DT)
+cor(DT$quantity, predicted_quantity)
+```
+
+If we increase prices by 3:
+
+```{r, results = "hide"}
+new_DT = copy(DT)
+new_DT[, price := price + 3]
+new_predicted_quantity = predict.felm(fit, new_DT)
+```
+
+```{r}
+mean(predicted_quantity)
+mean(new_predicted_quantity)
+```
+
+
