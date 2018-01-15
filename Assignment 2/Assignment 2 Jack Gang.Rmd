@@ -1,0 +1,170 @@
+---
+title: "Base Pricing Analysis and Price Elasticity Estimation"
+author: "Jack Gang"
+date: "1/24/2017"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+
+
+Our goal is to conduct a base pricing analysis. We will first estimate brand-level demand using scanner data, and then we will make profitability predictions corresponding to specific base price changes. Then we will estimate log-linear demand models that use (log) prices and promotions as inputs, and predict log quantities, log(1+Q). The models predict the demand for a focal brand, and we will control for (log) prices and promotions of three competitors. Our focus is on the two top brands in the liquid laundry detergent category, Tide and Gain. Both are Procter & Gamble brands. The two closest competitors are Arm & Hammer and Purex.
+
+
+
+## Packages
+
+Before starting the analysis, we installed the necessary R packages:
+
+```{r}
+# install packages
+library(bit64)
+library(data.table)
+library(lfe)
+library(knitr)
+library(stargazer)
+library(ggplot2)
+```
+
+## Prepare the data for the demand analysis
+
+We first loaded and inspected the brand and store meta data:
+
+```{r}
+# load data, assumes they're in same directory as R script = working directory
+load("Brands.RData")
+load("Stores.RData")
+
+# inspect data
+head(brands)
+head(stores)
+```
+
+### Select the category and brands
+
+Since we only care about the laundry detergent data, we filtered the `brands` table using the laundary detergent category (module). Then we sorted the brand data by total brand revenue and selected the top 4 brands:
+
+```{r}
+selected_module = 7012    # laundry detergent
+
+# filter, order by descending revenue, and select top 4 brands
+laundryBrands = brands[product_module_code == 7012]
+laundryBrands = laundryBrands[order(-revenue)]
+laundryBrands = laundryBrands[1:4]
+```
+
+For simplicity, we assigned each brand a new name using a new variable, `brand_name`:
+
+```{r}
+laundryBrands[, brand_name := ifelse(brand_code_uc == 653791, "Tide",
+                                     ifelse(brand_code_uc == 557775, "Gain",
+                                            ifelse(brand_code_uc == 507562, 
+                                                   "ArmHammer", "Purex")))]
+```
+
+### Prepare the movement data
+
+We then loaded the movement data and changed the variable names from `units` to `quantity` and `promo_dummy` to `promotion` for better readability. We also changed the data type of `promotion` from `logical` to `numeric` and merged the new `brand_name` variable with the movement table:
+
+```{r}
+# load movement data and inspect
+load("brand_move_7012.RData")
+head(move)
+
+# rename column names
+colnames(move)[5] = "quantity"
+colnames(move)[6] = "promotion"
+
+# change data type of promotion to numeric
+move$promotion = as.numeric(move$promotion)
+
+# merge brand_name variable with movement table
+move = merge(move, laundryBrands[, .(brand_code_uc, brand_name)],
+             by="brand_code_uc")
+```
+
+### Remove outliers
+
+Since most data contain some outliers, we removed them from the price data, separately for each brand and store. We also tabulated the number of outliers:
+
+```{r}
+# classify as outlier function
+isOutlier <- function(x, threshold_bottom, threshold_top) 
+{
+  is_outlier = rep(FALSE, times = length(x))
+  median_x = median(x, na.rm = TRUE)
+  is_outlier[x/median_x < threshold_bottom | x/median_x > threshold_top] = TRUE
+  return(is_outlier)
+}
+
+# add column to move table that marks whether the price is an outlier or not
+move[, outlier := isOutlier(move$price, 0.35, 2.5)]
+
+# tabulate number of outliers and remove the rows from the data
+print(paste("Number of outliers: ", nrow(move[move$outlier == TRUE])))
+move = move[move$outlier == FALSE]
+move = subset(move, select = -outlier)    # delete unnecessary outlier column
+```
+
+### Reshape the movement data from long to wide format
+
+In order to prepare the data for regression analysis, we reshaped the data from long to wide format:
+
+```{r}
+# use dcast to reshape
+move = dcast(move, store_code_uc + week_end ~ brand_name,
+             value.var = c("quantity", "price", "promotion"))
+head(move)
+```
+
+### Merge store information with movement data
+
+We then merged the movement data with the store meta data, in particular with the retailer code, the Scantrack market code, and the Scantrack market description. We only do this with store meta data where we have a valid retailer code, so we first removed any store data that had `NA` values for retailer code:
+
+```{r}
+# remove store data that have retailer_code = NA
+stores = stores[!is.na(stores$retailer_code)]
+
+# merge movement data with store meta data
+move = merge(move, stores[, .(store_code_uc, retailer_code, SMM_code, 
+                              SMM_description)], by="store_code_uc")
+```
+
+### Create time variables or trends
+
+Next, we created time variables for the movement data, such that `1` corresponds to a week in the first month in the data:
+
+```{r}
+# find earliest/first week in the data
+firstWeek = min(move$week_end)
+minYear = year(firstWeek)
+startMonth = month(firstWeek)
+
+# create time trend variable
+move[, time_trend := 1+12*(year(week_end) - minYear)+(month(week_end)-startMonth)]
+```
+
+### Remove missing values
+
+Finally, we retained only "complete cases", i.e. rows without missing values:
+
+```{r}
+move = move[complete.cases(move)]
+```
+
+## Data inspection
+
+### Observations and geographic coverage
+
+
