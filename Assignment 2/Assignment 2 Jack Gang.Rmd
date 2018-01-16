@@ -160,11 +160,64 @@ move[, time_trend := 1+12*(year(week_end) - minYear)+(month(week_end)-startMonth
 Finally, we retained only "complete cases", i.e. rows without missing values:
 
 ```{r}
+# retain only complete cases
 move = move[complete.cases(move)]
 ```
 
 ## Data inspection
 
 ### Observations and geographic coverage
+
+In terms of data inspection, we first documented the number of observations and the number of unique stores in the data:
+
+```{r}
+# document observations and unique stores
+print(paste("Number of observations: ", nrow(move)))
+print(paste("Number of unique stores: ", length(unique(move$store_code_uc))))
+```
+
+Next, we assessed if the included stores have broad geographic coverage by creating a summary table that records the number of observations for each separate Scantrack market. We then used the `kable` function to document this table:
+
+```{r}
+# assess stores' geographic coverage
+market_coverage = move[, .(n_obs = .N), by = SMM_description]
+kable(market_coverage, col.names = c("Scantrack market", "No. obs."))
+```
+
+### Price variation
+
+Before estimating the demand models we want to understand the degree of price variation in the data. This is important for demand estimation because if all of the prices were very similar, it would be difficult to estimate how demand changes based on the price. On the other hand, if we have good price variation (and a lot of data), it's straightforward to create a demand curve that compares the quantity purchased to the purchase price.
+
+For Tide and Gain separately, we visualized the overall degree of price variation across observations, as well as the variation in relative prices with respect to their competing brands:
+
+```{r}
+# visualize own price variation
+ggplot(move, aes(x = move$price_Tide/mean(move$price_Tide))) + 
+  geom_histogram() + scale_x_continuous("Tide Price Normalized", 
+                                        limits = c(0.5, 2.0)) +
+  scale_y_continuous("Count", limits = c(0, 300000))
+ggplot(move, aes(x = move$price_Gain/mean(move$price_Gain))) + 
+  geom_histogram() + scale_x_continuous("Gain Price Normalized",
+                                        limits = c(0.5, 2.0)) +
+  scale_y_continuous("Count", limits = c(0, 300000))
+
+# visualize releative prices (to average of 3 competitors' prices)
+ggplot(move, aes(x = move$price_Tide/((move$price_ArmHammer + move$price_Gain +
+                                         move$price_Purex)/3))) + 
+  geom_histogram() + scale_x_continuous("Relative Tide Price", 
+                                        limits = c(0.0, 2.5)) +
+  scale_y_continuous("Count", limits = c(0, 300000))
+ggplot(move, aes(x = move$price_Gain/((move$price_ArmHammer + move$price_Tide +
+                                         move$price_Purex)/3))) + 
+  geom_histogram() + scale_x_continuous("Relative Gain Price",
+                                        limits = c(0.0, 2.5)) +
+  scale_y_continuous("Count", limits = c(0, 300000))
+
+```
+
+### Summary of data inspection
+
+
+
 
 
