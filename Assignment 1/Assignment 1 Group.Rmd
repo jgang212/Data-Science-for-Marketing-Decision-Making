@@ -1,6 +1,6 @@
 ---
 title: "Analysis of Household Buying Behavior: Carbonated Soft Drinks and Other Beverages"
-author: "Jack Gang"
+author: "Jack Gang, Lakshmi Jampana, Jennifer Lopez, Tommy Wu"
 date: "1/17/2017"
 output:
   pdf_document: default
@@ -39,24 +39,32 @@ load(purchases_file)
 load(products_file)
 ```
 
+
 ## Variable description
 
 After loading the data, we first inspected the `purchases` and `products` tables to understand them better:
 
 ```{r}
 head(purchases)
+```
+
+\newpage
+
+```{r}
 head(products)
 ```
 
 We then created a table `module_DT` that lists all the product module codes, product module descriptions, and group descriptions in the data:
 
-```{r}
+```{r, results = "hide"}
 # table that lists all departments, product groups, and product modules
 module_DT = products[, head(.SD, 1), by = product_module_code,
                      .SDcols = c("product_module_descr", 
                                  "product_group_descr", "department_descr")]
 module_DT[order(product_group_descr)]
 ```
+
+\newpage
 
 ## Prepare the data for the analysis
 
@@ -99,6 +107,8 @@ Then we merged the category variable with the purchase data:
 purchases = merge(purchases, products[, .(upc, upc_ver_uc, category)])
 ```
 
+\newpage
+
 #### Volume in equivalent units
 
 To see the volume in equivalent units, we first merged the purchase data with the following product level information: `size1_units`, `size1_amount`, and `multi`:
@@ -137,6 +147,8 @@ households_DT = purchases[, head(.SD, 1), by = year,
 households_DT[order(year)]
 ```
 
+\newpage
+
 ## Category-level analysis
 
 In order to analyze the evolution of purchases and consumption in the 4 product categories, we first calculated total and per capital consumption metrics. First, we created the total dollar spend and the total purchase volume for each category/year combination. Then we calculated per capita spend and purchase volume (in gallons) for each category separately:
@@ -151,6 +163,8 @@ purchases_category[, spend_percap := spend/no_households]
 purchases_category[, purchvol_percap := purchase_volume/no_households]
 ```
 
+\newpage
+
 The following is a graph of the evolution of the yearly per capital purchase volume for all four categories:
 
 ```{r}
@@ -160,6 +174,8 @@ library(ggplot2)
 ggplot(purchases_category, aes(as.factor(year), purchvol_percap)) +
   geom_col() + facet_wrap(~category, nrow=2)
 ```
+
+\newpage
 
 It makes more sense to look at this evolution after normalizing the data, since it allowed us to compare the consumption series in each category directly in percentage terms. We expressed the purchase/consumption data as multiples of the 2004 values, such that per capita volume takes the value of 1.0 in all categories in 2004. Again, a graph is shown to display this evolution:
 
@@ -178,6 +194,8 @@ ggplot(purchases_category, aes(as.factor(year), purchvol_percap_norm)) +
 ```
 
 As we can see in the graph, bottled water consumption has increased over 50% since 2004, and this has largely replaced consumption in the other 3 categories of CSD's, diet CSD's, and all other beverages. CSD's took the biggest hit with a 31% decrease in consumption over this time, whereas Diet CSD's decreased by 21% and other beverages decreased by only 17%. This could be due to a move toward "healthier" consumption, as many of the beverages in the other category are juices and other non-water drinks that are healthier than the traditional carbonated soda.
+
+\newpage
 
 ## Brand-level analysis
 
@@ -232,20 +250,37 @@ for (cat in unique(purchases$category))
   
   brands_by_cat_list[cat] = list(cat_brand)
 }
+```
 
+\newpage
+
+```{r}
 # plot evolution of brand volume
 ggplot(brands_by_cat_list$'Bottled Water', aes(as.factor(year), purchvol_percap_norm)) +
   geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+```
 
+\newpage
+
+```{r}
 ggplot(brands_by_cat_list$'CSD', aes(as.factor(year), purchvol_percap_norm)) +
   geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+```
 
+\newpage
+
+```{r}
 ggplot(brands_by_cat_list$'Diet CSD', aes(as.factor(year), purchvol_percap_norm)) +
   geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
+```
 
+\newpage
+```{r}
 ggplot(brands_by_cat_list$'Other', aes(as.factor(year), purchvol_percap_norm)) +
   geom_col() + facet_wrap(~brand_descr, nrow=2, scales = "free_y")
 ```
+
+\newpage
 
 ## Discussion
 
