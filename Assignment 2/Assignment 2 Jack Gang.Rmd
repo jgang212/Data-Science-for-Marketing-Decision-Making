@@ -186,7 +186,7 @@ kable(market_coverage, col.names = c("Scantrack market", "No. obs."))
 
 ### Price variation
 
-Before estimating the demand models we want to understand the degree of price variation in the data. This is important for demand estimation because if all of the prices were very similar, it would be difficult to estimate how demand changes based on the price. On the other hand, if we have good price variation (and a lot of data), it's straightforward to create a demand curve that compares the quantity purchased to the purchase price.
+Before estimating the demand models we wanted to understand the degree of price variation in the data. This is important for demand estimation because if all of the prices were very similar, it would be difficult to estimate how demand changes based on the price. On the other hand, if we have good price variation (and a lot of data), it's straightforward to create a demand curve that compares the quantity purchased to the purchase price.
 
 For Tide and Gain separately, we visualized the overall degree of price variation across observations, as well as the variation in relative prices with respect to their competing brands:
 
@@ -217,7 +217,39 @@ ggplot(move, aes(x = move$price_Gain/((move$price_ArmHammer + move$price_Tide +
 
 ### Summary of data inspection
 
+The data seems to be relatively robust. A sample size of 1251368 observations and 6417 stores after removing outliers and checking for completeness is quite large. 76 geographic markets are covered in the sample with plenty of data points in each; the number of observations range from 1223 in Rem Philadelphia to 126457 in Los Angeles. In terms of own price variation, most of Tide and Gain's prices range between 0.75x and 1.5x of their respective average prices, which is a fair amount of price variation. For relative variation, Tide's prices range from 0.75x and 2x of its competitors, while Gain's prices range from 0.5x to 1.75x of its competitors; this again shows substantial price variation for our analysis.
 
+## Estimation
 
+We first estimated demand for Tide only with a sequence of models with an increasing number of controls and compared the stability of the key results across these models. We started with the following 4 models:
+
+```{r}
+source("../R Learning Resources/predict.felm.r")
+
+# log of own price only
+fit_base = felm(log(1+quantity_Tide) ~ log(price_Tide), data = move)
+
+# add store fixed effects
+fit_store_FE = felm(log(1+quantity_Tide) ~ log(price_Tide) 
+                    | store_code_uc, data = move)
+
+# add a time trend
+fit_trend = felm(log(1+quantity_Tide) ~ log(price_Tide) 
+                 | store_code_uc, data = move)
+
+# add fixed effects for each month
+fit_month_FE = felm(log(1+quantity_Tide) ~ log(price_Tide) 
+                    | store_code_uc + time_trend, data = move)
+
+```
+
+We then displayed the regression coefficients using `stargazer`:
+
+```{r}
+stargazer(fit_base, fit_store_FE, fit_trend, fit_month_FE, type = "text",
+          column.labels = c("Base", "Store FE", "Trend", 
+                            "Store + year/month FE"),
+          dep.var.labels.include = FALSE)
+```
 
 
