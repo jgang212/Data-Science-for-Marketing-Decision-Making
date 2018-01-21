@@ -3,9 +3,9 @@ title: "Base Pricing Analysis and Price Elasticity Estimation"
 author: "Jack Gang"
 date: "1/24/2017"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
-  pdf_document: default
   word_document: default
 header-includes: \usepackage{color}
 graphics: yes
@@ -460,10 +460,6 @@ profit_DT = data.table(delta_Tide = rep(percentage_delta, each = L),
 Finally we iterated over `profit_DT` to evaluate the total product-line profits of Tide and Gain for the corresponding percentage price changes:
 
 ```{r}
-# store original price levels of Tide and Gain
-TidePrice = mean(move_predict$price_Tide)
-GainPrice = mean(move_predict$price_Gain)
-
 # iterate over profit_DT table
 for (i in 1:nrow(profit_DT)) 
   {
@@ -481,6 +477,12 @@ for (i in 1:nrow(profit_DT))
   }
 ```
 
+For ease of comparison, we added an additional column to `profit_DT` that shows the profit in ratios relative to the baseline profit at current price levels.
 
+```{r}
+# add profit relative to baseline column
+baselineProfit = profit_DT[delta_Tide == 0][delta_Gain == 0]$profit
+profit_DT[, profitRatio := profit/baselineProfit]
+```
 
-
+From the table, we can see that the maximum profitability point is when Tide's price is decreased by 5% and Gain's price is increased by 5%. Of course, since this is the edge of our percentage delta range, it's possible that we can decrease Tide's price further and/or increase Gain's price further for more profits. However, it's probably prudent to start with smaller price changes and looking at the analysis in the future with new data, in case the current model does not predict well outside of 5% price changes.
