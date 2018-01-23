@@ -3,9 +3,9 @@ title: "Base Pricing Analysis and Price Elasticity Estimation"
 author: "Jack Gang"
 date: "1/24/2017"
 output:
-  pdf_document: default
   html_document:
     df_print: paged
+  pdf_document: default
   word_document: default
 header-includes: \usepackage{color}
 graphics: yes
@@ -191,27 +191,45 @@ Before estimating the demand models we wanted to understand the degree of price 
 For Tide and Gain separately, we visualized the overall degree of price variation across observations, as well as the variation in relative prices with respect to their competing brands:
 
 ```{r}
+library(gridExtra)
+
 # visualize own price variation
-ggplot(move, aes(x = move$price_Tide/mean(move$price_Tide))) + 
+tidePlot = ggplot(move, aes(x = move$price_Tide/mean(move$price_Tide))) + 
   geom_histogram() + scale_x_continuous("Tide Price Normalized", 
                                         limits = c(0.5, 2.0)) +
   scale_y_continuous("Count", limits = c(0, 300000))
-ggplot(move, aes(x = move$price_Gain/mean(move$price_Gain))) + 
+gainPlot = ggplot(move, aes(x = move$price_Gain/mean(move$price_Gain))) + 
   geom_histogram() + scale_x_continuous("Gain Price Normalized",
                                         limits = c(0.5, 2.0)) +
   scale_y_continuous("Count", limits = c(0, 300000))
+grid.arrange(tidePlot, gainPlot, ncol=2)
 
 # visualize releative prices (to average of 3 competitors' prices)
-ggplot(move, aes(x = move$price_Tide/((move$price_ArmHammer + move$price_Gain +
-                                         move$price_Purex)/3))) + 
-  geom_histogram() + scale_x_continuous("Relative Tide Price", 
+tideAPlot = ggplot(move, aes(x = move$price_Tide/mean(move$price_ArmHammer))) + 
+  geom_histogram() + scale_x_continuous("Relative Tide-ArmHammer Price", 
                                         limits = c(0.0, 2.5)) +
-  scale_y_continuous("Count", limits = c(0, 300000))
-ggplot(move, aes(x = move$price_Gain/((move$price_ArmHammer + move$price_Tide +
-                                         move$price_Purex)/3))) + 
-  geom_histogram() + scale_x_continuous("Relative Gain Price",
+  scale_y_continuous("Count", limits = c(0, 400000))
+tidePPlot = ggplot(move, aes(x = move$price_Tide/mean(move$price_Purex))) + 
+  geom_histogram() + scale_x_continuous("Relative Tide-Purex Price", 
                                         limits = c(0.0, 2.5)) +
-  scale_y_continuous("Count", limits = c(0, 300000))
+  scale_y_continuous("Count", limits = c(0, 400000))
+tideGPlot = ggplot(move, aes(x = move$price_Tide/mean(move$price_Gain))) + 
+  geom_histogram() + scale_x_continuous("Relative Tide-Gain Price", 
+                                        limits = c(0.0, 2.5)) +
+  scale_y_continuous("Count", limits = c(0, 400000))
+gainAPlot = ggplot(move, aes(x = move$price_Gain/mean(move$price_ArmHammer))) + 
+  geom_histogram() + scale_x_continuous("Relative Gain-ArmHammer Price", 
+                                        limits = c(0.0, 2.5)) +
+  scale_y_continuous("Count", limits = c(0, 400000))
+gainPPlot = ggplot(move, aes(x = move$price_Gain/mean(move$price_Purex))) + 
+  geom_histogram() + scale_x_continuous("Relative Gain-Purex Price", 
+                                        limits = c(0.0, 2.5)) +
+  scale_y_continuous("Count", limits = c(0, 400000))
+gainTPlot = ggplot(move, aes(x = move$price_Gain/mean(move$price_Tide))) + 
+  geom_histogram() + scale_x_continuous("Relative Gain-Tide Price", 
+                                        limits = c(0.0, 2.5)) +
+  scale_y_continuous("Count", limits = c(0, 400000))
+grid.arrange(tideAPlot, tidePPlot, tideGPlot, gainAPlot, gainPPlot, gainTPlot, ncol=3, nrow=2)
 
 ```
 
@@ -270,7 +288,7 @@ stargazer(fit_month_FE, fit_comp, type = "text",
           dep.var.labels.include = FALSE)
 
 # remove unneeded object
-rm(fit_store_FE)
+rm(fit_month_FE)
 ```
 
 ### Controlling for promotions
@@ -483,6 +501,7 @@ For ease of comparison, we added an additional column to `profit_DT` that shows 
 # add profit relative to baseline column
 baselineProfit = profit_DT[delta_Tide == 0][delta_Gain == 0]$profit
 profit_DT[, profitRatio := profit/baselineProfit]
+kable(profit_DT, col.names = c("Gain Price Delta", "Tide Price Delta", "Profit($)", "Relative Profit"))
 ```
 
 From the table, we can see that the maximum profitability point is when Tide's price is decreased by 5% and Gain's price is increased by 5%. Of course, since this is the edge of our percentage delta range, it's possible that we can decrease Tide's price further and/or increase Gain's price further for more profits. However, it's probably prudent to start with smaller price changes and looking at the analysis in the future with new data, in case the current model does not predict well outside of 5% price changes.
