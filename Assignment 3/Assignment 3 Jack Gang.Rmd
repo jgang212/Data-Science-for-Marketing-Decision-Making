@@ -1,0 +1,84 @@
+---
+  title: "Private Label Demand"
+author: "Jack Gang"
+date: "1/31/2017"
+output:
+  html_document:
+  df_print: paged
+pdf_document: default
+word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+In this assignment, we will answer the question of whether private label demand is sensitive to household income and wealth. We will study this question using data from the Nielsen Homescan panel, and we will also use publicly available local home value data from Zillow as a measure of wealth. The overall data analysis strategy is as follows:
+  
+  1. Construct household-level private label shares for all months between 2004-2014
+2. Use household-level income, employment, and other information contained in the Nielsen data
+3. Use local, 5-digit ZIP code Zillow home value data as a measure of local housing wealth
+4. Summarize the data
+5. Provide regression results of private label shares on income, employment, wealth (Zillow home value index), and other controls
+
+In the first part of the assignment we will construct the private label share data and save them to file. In the second part we will finish the data preparation and then run the statistical analysis.
+
+## Zillow data construction
+
+We first retrieved the Zillow data (in csv format) from the Zillow website:
+  
+  
+```{r}
+library(bit64)
+library(data.table)
+library(lubridate)
+
+# read in Zillow data
+zillow_DT = fread("http://files.zillowstatic.com/research/public/Zip/Zip_Zhvi_AllHomes.csv")
+names(zillow_DT)[1:20]
+```
+
+Next, we `melt`ed the table from wide to long format:
+  
+```{r}
+# melt zillow_DT
+zillow_DT = melt(zillow_DT, id.vars = names(zillow_DT)[1:7], measure.vars = 
+                   names(zillow_DT)[8:ncol(zillow_DT)], variable.name = "date",
+                 value.name = "zillow_index")
+head(zillow_DT)
+```
+
+Before saving the data, we wanted to clean it. First, we converted `date` to a `month_year` R date variable:
+  
+```{r}
+# convert date to month_year
+zillow_DT[, date := as.character(date)]
+zillow_DT[, month_year := ymd(date, truncated = 2)]
+```
+
+We then created a `zip_code` variable from `RegionName`:
+  
+```{r}
+zillow_DT[, zip_code := as.integer(RegionName)]
+```
+
+Finally, we removed some unnecessary variables, set the preferred column order, and keyed the data:
+  
+```{r}
+zillow_DT[, c("date", "RegionID", "RegionName") := NULL]
+setcolorder(zillow_DT, c("zip_code", "month_year", "zillow_index","City",
+                         "State", "Metro", "CountyName", "SizeRank"))
+setkey(zillow_DT, zip_code, month_year)
+```
+
+After cleaning the data, we saved it to a file:
+  
+```{r}
+save(zillow_DT, file = "./Data/Zillow-Data.RData")
+```
+
+## Nielsen data
