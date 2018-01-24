@@ -408,7 +408,7 @@ fit_promo_comp = felm(log(1+quantity_Gain) ~ log(price_Gain) +
 
 # compare the results
 stargazer(fit_comp, fit_promo_comp_Gain, fit_promo_comp, type = "text",
-          column.labels = c("Base", "Tide Promo", "All Promo"),
+          column.labels = c("Base", "Gain Promo", "All Promo"),
           dep.var.labels.include = FALSE)
 
 # remove unneeded objects
@@ -504,4 +504,6 @@ profit_DT[, profitRatio := profit/baselineProfit]
 kable(profit_DT, col.names = c("Gain Price Delta", "Tide Price Delta", "Profit($)", "Relative Profit"))
 ```
 
-From the table, we can see that the maximum profitability point is when Tide's price is decreased by 5% and Gain's price is increased by 5%. Of course, since this is the edge of our percentage delta range, it's possible that we can decrease Tide's price further and/or increase Gain's price further for more profits. However, it's probably prudent to start with smaller price changes and looking at the analysis in the future with new data, in case the current model does not predict well outside of 5% price changes.
+From the table, we can see that the maximum profitability point is when Gain's price is decreased by 5% and Tide's price is increased by 5%. Of course, since this is the edge of our percentage delta range, it's possible that we can decrease Gain's price further and/or increase Tide's price further for more profits. However, it's probably prudent to start with smaller price changes and looking at the analysis in the future with new data, in case the current model does not predict well outside of 5% price changes.
+
+This recommended price change is consistent with Tide and Gain's own-price elasticity estimates. Since Tide's own-price elasticity is smaller (absolute) than Gain's, it's better to increase Tide's price to and decrease Gain's price. This way, Tide's relative decrease in demand is more than offset by Gain's relative increase in demand. One note is that this assumption works because we assume that the profitability margins for Tide and Gain are identical.
