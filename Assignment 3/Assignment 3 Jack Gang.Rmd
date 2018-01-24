@@ -1,25 +1,25 @@
 ---
-  title: "Private Label Demand"
+title: "Private Label Demand"
 author: "Jack Gang"
 date: "1/31/2017"
 output:
   html_document:
-  df_print: paged
-pdf_document: default
-word_document: default
+    df_print: paged
+  pdf_document: default
+  word_document: default
 header-includes: \usepackage{color}
 graphics: yes
 urlcolor: blue
 ---
-  
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
                       fig.width = 10, fig.height = 10, fig.align = "center")
 ```
 
 In this assignment, we will answer the question of whether private label demand is sensitive to household income and wealth. We will study this question using data from the Nielsen Homescan panel, and we will also use publicly available local home value data from Zillow as a measure of wealth. The overall data analysis strategy is as follows:
-  
-  1. Construct household-level private label shares for all months between 2004-2014
+
+1. Construct household-level private label shares for all months between 2004-2014
 2. Use household-level income, employment, and other information contained in the Nielsen data
 3. Use local, 5-digit ZIP code Zillow home value data as a measure of local housing wealth
 4. Summarize the data
@@ -30,8 +30,8 @@ In the first part of the assignment we will construct the private label share da
 ## Zillow data construction
 
 We first retrieved the Zillow data (in csv format) from the Zillow website:
-  
-  
+
+
 ```{r}
 library(bit64)
 library(data.table)
@@ -43,7 +43,7 @@ names(zillow_DT)[1:20]
 ```
 
 Next, we `melt`ed the table from wide to long format:
-  
+
 ```{r}
 # melt zillow_DT
 zillow_DT = melt(zillow_DT, id.vars = names(zillow_DT)[1:7], measure.vars = 
@@ -53,7 +53,7 @@ head(zillow_DT)
 ```
 
 Before saving the data, we wanted to clean it. First, we converted `date` to a `month_year` R date variable:
-  
+
 ```{r}
 # convert date to month_year
 zillow_DT[, date := as.character(date)]
@@ -61,13 +61,13 @@ zillow_DT[, month_year := ymd(date, truncated = 2)]
 ```
 
 We then created a `zip_code` variable from `RegionName`:
-  
+
 ```{r}
 zillow_DT[, zip_code := as.integer(RegionName)]
 ```
 
 Finally, we removed some unnecessary variables, set the preferred column order, and keyed the data:
-  
+
 ```{r}
 zillow_DT[, c("date", "RegionID", "RegionName") := NULL]
 setcolorder(zillow_DT, c("zip_code", "month_year", "zillow_index","City",
@@ -76,9 +76,61 @@ setkey(zillow_DT, zip_code, month_year)
 ```
 
 After cleaning the data, we saved it to a file:
-  
+
 ```{r}
 save(zillow_DT, file = "./Data/Zillow-Data.RData")
 ```
 
-## Nielsen data
+## Household-level private label share creation
+
+### Tagging private label products
+
+We used the same Nielsen Homescan household panel data for the analysis as we did in the first assignment. The first thing we did was analyze the evolution of private label shares. We loaded the product data and added a flag called `is_PL` that equals `TRUE` if a product is a private label product:
+
+```{r}
+# load the product data
+load("../../main/Assignment-3/Products.RData")
+
+# add a flag to mark if a product is a private label
+products[, is_PL := ifelse(like(brand_descr, "CTL BR"), TRUE, FALSE)]
+
+# look at table of all the matches for private label
+table(products[products$is_PL]$brand_descr)
+```
+
+### Iteration and data reduction strategy
+
+Since the purchase data are at the year level, we iterated over all the files to combine the calculations in one table. For each household, we calculated private label shares at the year/month level:
+
+```{r}
+# iterate over all purchase files
+for (yr in 2004:2014)
+{
+  # load purchase data
+  load(paste0("../../main/Assignment-3/purchases_", yr, ".RData"))
+  
+  # merge is_PL flag, department code, and product module code
+  purchases = merge(purchases, 
+                    products[, .(upc, upc_ver_uc, is_PL, department_code, 
+                                 product_module_code)])
+  
+  # drop some departments and product modules from the data set
+  department_DT = products[, head(.SD, 1), by = department_code,
+                     .SDcols = c("department_descr")]
+  department_DT[order(department_code)]
+  
+  purchases = purchases[purchases$department_code != 9] # general merchandise
+  purchases = purchases[purchases$department_code != 99] # magnet data
+  purchases = purchases[purchases$product_module_code >= 1000] # magnet data 
+  purchases = purchases[!is.na(purchases$department_code)] # unknown department code
+  
+  # create a month_year date variable
+  purchases[, month_year := floor_date(purchases$purchase_date, "month")]
+  
+  # create total dollar spending at the household/month/year level, separately 
+  # for private label and other (national brand) products
+  
+}
+
+```
+
