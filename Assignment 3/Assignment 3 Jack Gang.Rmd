@@ -78,7 +78,7 @@ setkey(zillow_DT, zip_code, month_year)
 After cleaning the data, we saved it to a file:
 
 ```{r}
-save(zillow_DT, file = "./Data/Zillow-Data.RData")
+save(zillow_DT, file = "/classes/37105/group7/Assignment 3/Data/Zillow-Data.RData")
 ```
 
 ## Household-level private label share creation
@@ -89,7 +89,7 @@ We used the same Nielsen Homescan household panel data for the analysis as we di
 
 ```{r}
 # load the product data
-load("../../main/Assignment-3/Products.RData")
+load("/classes/37105/main/Assignment-3/Products.RData")
 
 # add a flag to mark if a product is a private label
 products[, is_PL := ifelse(like(brand_descr, "CTL BR"), TRUE, FALSE)]
@@ -103,11 +103,13 @@ table(products[products$is_PL]$brand_descr)
 Since the purchase data are at the year level, we iterated over all the files to combine the calculations in one table. For each household, we calculated private label shares at the year/month level:
 
 ```{r}
+shares_DT = data.table()
+
 # iterate over all purchase files
 for (yr in 2004:2014)
 {
   # load purchase data
-  load(paste0("../../main/Assignment-3/purchases_", yr, ".RData"))
+  load(paste0("/classes/37105/main/Assignment-3/purchases_", yr, ".RData"))
   
   # merge is_PL flag, department code, and product module code
   purchases = merge(purchases, 
@@ -129,8 +131,154 @@ for (yr in 2004:2014)
   
   # create total dollar spending at the household/month/year level, separately 
   # for private label and other (national brand) products
+  purchases[, no_households := length(unique(household_code)), by = month_year]
+  purchases_total = purchases[, .(totalSpend = sum(total_price_paid - coupon_value)),
+                           keyby = .(is_PL, household_code, month_year)]
+  purchases_total = dcast(purchases_total, household_code + month_year ~ is_PL, 
+               value.var = c("totalSpend"))
   
+  # convert to percentage shares
+  purchases_total[, perc_share := purchases_total$"TRUE"/
+                    (purchases_total$"TRUE" + purchases_total$"FALSE")]
+  
+  # keep data on household/month/year/private label shares only
+  purchases_total[, c("TRUE","FALSE"):=NULL]
+  
+  # insert the final data for the given year into a list
+  shares_DT = rbind(shares_DT, purchases_total)
 }
 
+# remove missing values due to 0 household spending
+nrow(shares_DT)
+shares_DT = shares_DT[complete.cases(shares_DT)]
+nrow(shares_DT)
+
+# key the data at the household/month/year level save to file
+setkeyv(shares_DT, c("household_code", "month_year"))
+save(shares_DT, file = "/classes/37105/group7/Assignment 3/Data/shares-Data.RData")
+
 ```
+
+## Household data preparation
+
+Before we began with the main analysis, we first examined the household data in the `panelists.RData` file.
+
+```{r}
+library(psych)
+library(lfe)
+library(ggplot2)
+library(knitr)
+library(stargazer)
+
+# load and examine panelist data
+load("/classes/37105/main/Assignment-3/panelists.RData")
+names(panelists)
+```
+
+It is important to note that household income is represented as a factor with different levels representing an income range:
+
+```{r}
+# inspect household_income variable
+is.factor(panelists$household_income)
+levels(panelists$household_income)
+```
+
+Our results were easier to interpret if we converted the factor representation of income to a dollar measure as follows:
+
+```{r}
+# convert household_income to dollars
+panelists[household_income == "-$5000", income := 2500]
+panelists[household_income == "$5000-$7999", income := 6500]
+panelists[household_income == "$8000-$9999", income := 9000]
+panelists[household_income == "$10,000-$11,999", income := 11000]
+panelists[household_income == "$12,000-$14,999", income := 13500]
+panelists[household_income == "$15,000-$19,999", income := 17500]
+panelists[household_income == "$20,000-$24,999", income := 22500]
+panelists[household_income == "$25,000-$29,999", income := 27500]
+panelists[household_income == "$30,000-$34,999", income := 32500]
+panelists[household_income == "$35,000-$39,999", income := 37500]
+panelists[household_income == "$40,000-$44,999", income := 42500]
+panelists[household_income == "$45,000-$49,999", income := 47500]
+panelists[household_income == "$50,000-$59,999", income := 55000]
+panelists[household_income == "$60,000-$69,999", income := 65000]
+panelists[household_income == "$70,000-$99,999", income := 85000]
+panelists[household_income == "$100,000 + ", income := 112500]
+panelists[household_income == "$100,000 - $124,999", income := 112500]
+panelists[household_income == "$125,000 - $149,999", income := 132500]
+panelists[household_income == "$150,000 - $199,999", income := 175000]
+panelists[household_income == "$200,000 + ", income := 250000]
+```
+
+Because the detailed income levels above \$100,000 were only recorded for the 2006-2009 panel years, for consistency we replaced these values with \$112,500:
+
+```{r}
+# replace high incomes with $112,500
+panelists[income >= 100000, income := 112500]
+```
+
+Furthermore, Homescan's household income data represents ranges of total household income for the full year that is 2 years prior to the Panel Year. To correctly date the income data we needed to associate the income reported two years in the future with the current panel year:
+
+```{r}
+# make sure panelists table is correctly keyed
+key(panelists)
+
+# replace income for a given year with the lead of income two years ahead
+panelists[, income := shift(income, n = 2, type = "lead"), by = household_code]
+```
+
+Some of the key demographic variables, in particular, age or birth year, employment, and education, are available both for a male head and a female head in each household. However, depending on the household composition, only one household head may be present, and more generally we want to simplify this information to make our results more easily interpretable.
+
+A simple solution is to use information on employment, etc., for the male head by default, and use information for the female head if no male head is present in a household. The choice of the male head reflects that the incidence of the employment status `Not Employed for Pay` is higher for the female head than for the male
+head in the data. We confirmed this:
+
+```{r}
+# incidence of employment status "Not Employed for Pay" by gender
+nrow(panelists[panelists$male_head_employment == "Not Employed for Pay"])
+nrow(panelists[panelists$female_head_employment == "Not Employed for Pay"])
+```
+
+Then we created new `age`, `unemployed`, and `education` variables:
+
+```{r}
+# female head flag
+panelists[, female_head := male_head_age == "No Such Head"]
+
+# age variable - converted from birth year character string
+head(panelists$female_head_birth)
+panelists[, age := male_head_birth]
+panelists[female_head == TRUE, age := female_head_birth]
+panelists[, age := panel_year - as.numeric(substr(age, 1, 4))]
+
+# unemployed flag
+panelists[, unemployed := male_head_employment == "Not Employed for Pay"]
+panelists[female_head == TRUE, 
+          unemployed := female_head_employment == "Not Employed for Pay"]
+
+# education flag
+panelists[, education := male_head_education]
+panelists[female_head == TRUE, education := female_head_education]
+```
+
+In addition, we created two more variables. `size` provides a numeric measure of the `household_size` of a panelist. `has_children` is a dummy indicator that equals 1 if children are present in the household:
+
+```{r}
+# size variable
+levels(panelists$household_size)
+panelists[household_size == "Single Member", size := 1]
+panelists[household_size == "Two Members", size := 2]
+panelists[household_size == "Three Members", size := 3]
+panelists[household_size == "Four Members", size := 4]
+panelists[household_size == "Five Members", size := 5]
+panelists[household_size == "Six Members", size := 6]
+panelists[household_size == "Seven Members", size := 7]
+panelists[household_size == "Eight Members", size := 8]
+panelists[household_size == "Nine+ Members", size := 9]
+
+# has_children variable
+levels(panelists$age_and_presence_of_children)
+panelists[, has_children := TRUE]
+panelists[age_and_presence_of_children == "No Children Under 18"]$has_children = FALSE
+```
+
+
 
