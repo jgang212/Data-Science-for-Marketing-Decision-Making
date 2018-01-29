@@ -280,5 +280,132 @@ panelists[, has_children := TRUE]
 panelists[age_and_presence_of_children == "No Children Under 18"]$has_children = FALSE
 ```
 
+## Merge demographic and home value data with the private label share data
+
+We then merged the household data and Zillow home indices with our previously calculated private label share data.
+
+### Merge demographic information
+
+We created a common, unambiguous key between the share data and the panel data by extracting the year component from the date variable in the share data:
+
+```{r}
+# load in share data and create common year key
+load("/classes/37105/group7/Assignment 3/Data/shares-Data.RData")
+shares_DT[, panel_year := year(month_year)]
+```
+
+Next, we merged demographic variables, zip code, DMA code, and household projection factors with the share data:
+
+```{r}
+# merge panelist information with share data
+shares_DT = merge(shares_DT, panelists[, .(household_code, panel_year, income,
+                                           unemployed, education, age, size, 
+                                           has_children, female_head, 
+                                           marital_status, race, 
+                                           hispanic_origin, panelist_zip_code, 
+                                           dma_code, projection_factor)],
+                  by=c("household_code","panel_year"))
+```
+
+### Merge Zillow data
+
+Next, we merged the Zillow data with the shares data:
+
+```{r}
+# load in Zillow data and create common zip code key
+load("/classes/37105/group7/Assignment 3/Data/Zillow-Data.RData")
+setnames(shares_DT, "panelist_zip_code", "zip_code")
+
+# merge Zillow data with share data
+shares_DT = merge(shares_DT, zillow_DT[, .(zip_code, month_year, zillow_index,
+                                           City, State, Metro, CountyName,
+                                           SizeRank)], 
+                  by=c("zip_code","month_year"), all.x = TRUE)
+
+```
+
+After all these merges, we set the key for the share data to return them to the original order:
+
+```{r}
+# key the share data to household/month/year level
+setkeyv(shares_DT, c("household_code", "month_year"))
+```
+
+Finally, for better scaling, we represented the shares on a 0-100 percent scale:
+
+```{r}
+# represent shares on 0-100 percent scale:
+shares_DT$perc_share = shares_DT$perc_share*100
+```
+
+## Data description
+
+### Distribution of private label shares across households
+
+First, we provided an overview of the distribution of private label shares across households. To average away the randomness in the month-to-month shares, we created annual private label shares for each household based on a simple average (mean):
+
+```{r}
+# create annual private label shares for each household
+shares_households = shares_DT[,.(mean_perc_share = mean(perc_share)), 
+                              by = .(panel_year,household_code)]
+```
+
+### Provide summary statistics and a histogram of the distribution of the private label shares across households
+
+### Evolution of private label shares over time
+
+To plot the evolution of private label shares over time, we provided a time-series graph of mean private label shares (across households) by month. We first calculated the average (across households) private label shares for each month/year using a weighted mean (with `projection_factor` as the weight):
+
+```{r}
+# calculate average private label shares for each month/year
+shares_households = shares_DT[,.(mean_perc_share =
+                                   weighted.mean(perc_share, projection_factor)), 
+                              by = .(month_year)]
+
+# time-series graph of evolution of private label shares
+ggplot(shares_households, aes(month_year, mean_perc_share)) +
+  annotate("rect", xmin = mdy("12-01-2007"), xmax = mdy("06-01-2009"), 
+           ymin = -Inf, ymax = Inf, fill = "lightblue1", alpha = 0.4) +
+  geom_line() +
+  geom_point() +
+  scale_x_date("Year", date_labels = "%Y", date_breaks = "1 years", minor_breaks = NULL)
+
+```
+
+### Change in home values
+
+To document the change in home values between June 2006 and June 2009 (the last month of the Great Recession), we calculated the percentage change in the `zillow_index` at the ZIP code level:
+
+```{r}
+# aggregate mean zillow_index data by month/year and zip code
+zindex_monthzip = shares_DT[,.(mean_zillow_index = 
+                                 weighted.mean(zillow_index, projection_factor)), 
+                            by = .(month_year, zip_code)]
+setkeyv(zindex_monthzip, c("zip_code", "month_year"))
+
+# remove zip codes that don't have data for June 2006 or June 2009
+zips = intersect(unique(zindex_monthzip[month_year == '2006-06-01']$zip_code), 
+                 unique(zindex_monthzip[month_year == '2009-06-01']$zip_code))
+zindex_monthzip2 = zindex_monthzip[zindex_monthzip$zip %in% zips]
+
+# shift zillow_index by 36 and calculate the percentage change
+zindex_monthzip2[, shifted_zillow_index := shift(mean_zillow_index, 36)]
+zindex_monthzip2[, perc_change := shifted_zillow_index/mean_zillow_index]
+perc_changes = zindex_monthzip2[month_year == '2009-06-01']
+perc_changes = perc_changes[complete.cases(perc_changes)]
+
+```
+
+Then, we provided a histogram of the percentage home value changes (June 2009 versus June 2006):
+
+```{r}
+# plot histogram of percentage home value changes from June 2006 to June 2009
+ggplot(perc_changes, aes(perc_change)) + 
+  geom_histogram() + scale_x_continuous("% Home Value Change 6/2006 - 6/2009", 
+                                        limits = c(0.2, 3.5)) +
+  scale_y_continuous("Count", limits = c(0, 1000))
+```
+
+## Main Analysis
 
 
