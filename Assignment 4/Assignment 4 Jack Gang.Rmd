@@ -1,0 +1,218 @@
+---
+title: "Advertising Effects"
+author: "Jack Gang"
+date: "2/14/2017"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+## Overview
+
+Our goal is to estimate own and competitive brand-level advertising effects. We combined store-level sales data from the Nielsen RMS scanner data set with DMA-level advertising exposure data from the Nielsen Ad Intel advertising data. We compared estimates based on a within-market strategy that controlled for cross-sectional heterogeneity across markets with a border strategy that exploited the discontinuity in advertising at the common border between two neighboring DMA's. This assignment replicated some results that are part of an ongoing research project with Brad Shapiro that focuses on providing a comprehensive and general overview of advertising effectiveness across a large number of brands.
+
+```{r}
+# import packages
+library(bit64)
+library(data.table)
+library(RcppRoll)
+library(ggplot2)
+library(lfe)
+library(stargazer)
+library(knitr)
+```
+
+## Data
+
+### Brands and product modules
+
+We imported the `brands_DT` table and chose Prilosec in the Antacids category for our analysis:
+
+```{r}
+# import brands data
+load("/classes/37105/main/Assignment-4/Brands.RData")
+
+# select antacids
+selected_module = 8412
+
+# select Prilosec
+selected_brand = 621727
+```
+
+## Data preparation
+
+We then loaded the store meta-data from `Stores-DMA.RData`. We also loaded the RMS store-level scanner data from `move_8412.RData` and the Nielsen Ad Intel DMA-level TV advertising data from `adv_8412.RData`:
+
+```{r}
+# import store data
+load("/classes/37105/main/Assignment-4/Stores-DMA.RData")
+
+# import RMS scanner data
+load("/classes/37105/main/Assignment-4/move_8412.RData")
+
+# import Nielsen ad data
+load("/classes/37105/main/Assignment-4/adv_8412.RData")
+```
+
+Both the RMS scanner data and the Ad Intel advertising data include information for the top four brands in the category (product module). To make our analysis computationally more manageable, we did not distinguish among all individual competing brands, but instead we aggregated all competitors into one single brand.
+
+### RMS scanner data (`move`)
+
+For consistency, we renamed the `units` to `quantity` and `promo_percentage` to `promotion` (the promotion variable captures promotional activity as a continuous variable with values between 0 and 1):
+
+```{r}
+# rename columns in move
+names(move) <- c("brand_code_uc", "store_code_uc", "week_end", "quantity", "price", "promotion")
+```
+
+We then created the variable `brand_name` to distinguish between the own and aggregate competitor variables:
+
+```{r}
+# create brand_name variable
+move[, brand_name := ifelse(brand_code_uc == selected_brand, "own", "comp")]
+```
+
+We aggregated the data for each store/week observation, separately for `own` and `comp` data. We took the simple arithmetic `mean` over all competitor brands for prices and promotions:
+
+```{r}
+# aggregate data for each store/week observation, separately for own and comp
+move = move[,.(total_quantity = sum(quantity), price = mean(price),
+                   promotion = mean(promotion)),
+                by = .(store_code_uc, week_end, brand_name)]
+```
+
+We needed a common key between the RMS scanner data and the Ad Intel advertising data, so we merged the `dma_code` from the `stores` table with the RMS movement data:
+
+```{r}
+# extract DMA and store code and only retain unique rows
+stores_dma = unique(stores[, .(store_code_uc, dma_code)])
+
+# merge dma_code from stores into move
+move = merge(move, stores_dma[, .(store_code_uc, dma_code)], 
+             by = c("store_code_uc"))
+```
+
+### Ad Intel advertising data (`adv_DT`)
+
+Since the data did not contain observations for all DMA/week combinations during the observation period, we needed to capture that the number of GRP's was 0 for such observations:
+
+```{r}
+# extract information for cross join
+brands = unique(adv_DT$brand_code_uc)
+dma_codes = unique(adv_DT$dma_code)
+weeks = seq(from = min(adv_DT$week_end), to = max(adv_DT$week_end), by = "week")
+
+# cross join
+setkey(adv_DT, brand_code_uc, dma_code, week_end)
+adv_DT = adv_DT[CJ(brands, dma_codes, weeks)]
+
+# replace missing values with 0
+adv_DT[is.na(adv_DT)] = 0
+```
+
+Similar to what we did with the RMS scanner data, we then created own and competitor names and aggregated data at the DMA/week level. In particular, we aggregated based on the sum of the GRP's, separately for `grp_direct` and `grip_indirect`:
+
+```{r}
+# create brand_name variable
+adv_DT[, brand_name := ifelse(brand_code_uc == selected_brand, "own", "comp")]
+
+# aggregate data at the DMA/week level, separately for direct and indirect GRP
+adv_DT = adv_DT[,.(grp_direct = sum(grp_direct), 
+                   grp_indirect = sum(grp_indirect)),
+                by = .(dma_code, week_end, brand_name)]
+```
+
+We decided to use the sum of the direct and indirect GRP's to create a combined `grp` measure:
+
+```{r}
+# combine grp direct and direct
+adv_DT[, grp := grp_direct + grp_indirect]
+```
+
+### Calculate adstock/goodwill
+
+In order to calculate adstock, first we defined the parameters:
+
+```{r}
+# define adstock parameters
+N_lags = 52
+delta = 0.9
+```
+
+Then, we calculated the geometric weights based on the carry-over factor:
+
+```{r}
+# calculate geometric weights
+geom_weights = cumprod(c(1.0, rep(delta, times = N_lags)))
+geom_weights = sort(geom_weights)
+tail(geom_weights)
+```
+
+Finally, we calculated the adstock variable using the `roll_sum` function:
+
+```{r}
+# calculate adstock and add to agg_adv
+setkey(adv_DT, brand_name, dma_code, week_end)
+adv_DT[, adstock := roll_sum(log(1+grp), n = N_lags+1, weights = geom_weights,
+                             normalize = FALSE, align = "right", fill = NA),
+       by = .(brand_name, dma_code)]
+```
+
+### Merge scanner and advertising data
+
+We then merged the advertising data with the scanner data based on brand name, DMA code, and week:
+
+```{r}
+# merge adv data into move
+move = merge(move, adv_DT[, .(brand_name, dma_code, week_end, grp_direct, 
+                                grp_indirect, grp, adstock)], 
+               by = c("brand_name","dma_code","week_end"))
+```
+
+### Reshape the data
+
+Next, we reshaped the resulting data from long to wide format. The store code and week variable are the main row identifiers, and we also added the dma_code to the row variables. Quantity, price, promotion, and adstock are the column variables:
+
+```{r}
+# reshape data
+move = dcast(move, dma_code + store_code_uc + week_end ~ brand_name,
+             value.var = c("total_quantity", "price", "promotion", "adstock", "grp"))
+```
+
+Since the adstock variable is not defined for the first `N_lags` weeks in the data, we removed these missing values from `move`:
+
+```{r}
+# only keep complete cases
+move = move[complete.cases(move)]
+```
+
+### Time trend
+
+We also created a time trend/index for each month/year combination in the data:
+
+```{r}
+# create time trend variable
+firstWeek = min(move$week_end)
+minYear = year(firstWeek)
+startMonth = month(firstWeek)
+
+move[, time_trend := 1+12*(year(week_end) - minYear)+(month(week_end)-startMonth)]
+```
+
+## Data inspection
+
+### Time-series of advertising levels
+
+
+
+
