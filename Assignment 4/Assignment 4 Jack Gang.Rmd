@@ -213,6 +213,166 @@ move[, time_trend := 1+12*(year(week_end) - minYear)+(month(week_end)-startMonth
 
 ### Time-series of advertising levels
 
+We looked at an example time-series of weekly GRP's for the Lafayette, Louisiana (`dma_code` = 642):
 
+```{r}
+# plot time-series of weekly GRP's for Lafayette, LA
+ggplot(move[dma_code == 642], aes(week_end, grp_own)) + 
+  geom_line() +
+  geom_point() +
+  scale_x_date("Year", date_labels = "%Y", date_breaks = "1 years", minor_breaks = NULL)
+
+ggplot(move[dma_code == 642], aes(week_end, grp_comp)) + 
+  geom_line() +
+  geom_point() +
+  scale_x_date("Year", date_labels = "%Y", date_breaks = "1 years", minor_breaks = NULL)
+```
+
+### Overall advertising variation
+
+Next, we created a new variable at the DMA-level, `normalized_grp`, which is defined as `100*grp/mean(grp)`. This variable captures the percentage deviation of the GRP observations relative to the DMA-level mean of advertising. We plotted a histogram of this `normalized_grp`:
+
+```{r}
+# create normalized_grp
+move[, normalized_grp_own := 100*grp_own/mean(grp_own)]
+move[, normalized_grp_comp := 100*grp_comp/mean(grp_comp)]
+
+# plot histogram of normalized_grp
+ggplot(move, aes(normalized_grp_own)) + 
+  geom_histogram() + scale_x_continuous("Normalized GRP own", 
+                                        limits = c(0, 500)) +
+  scale_y_continuous("Count", limits = c(0, 1000000))
+
+ggplot(move, aes(normalized_grp_comp)) + 
+  geom_histogram() + scale_x_continuous("Normalized GRP comp", 
+                                        limits = c(0, 500)) +
+  scale_y_continuous("Count", limits = c(0, 1000000))
+
+```
+
+## Advertising effect estimation
+
+Finally, we estimated the following models for this case:
+
+1. Base specification that used the log of `1+quantity` as output and the log of prices (own and competitor) and promotions as inputs. This is controlled for store and month/year fixed effects.
+
+2. Add the `adstock` (own and competitor) to specification 1.
+
+3. Like specification 2, but not controlling for time fixed effects.
+
+We combined the results for comparison using the `stargazer` package:
+
+```{r}
+# own grp
+# base specification
+fit_base = felm(log(1+total_quantity_own) ~ log(price_comp) + log(price_own) + 
+                  promotion_comp + promotion_own | store_code_uc + time_trend,
+                data = move)
+
+# add adstock
+fit_ad = felm(log(1+total_quantity_own) ~ log(price_comp) + log(price_own) + 
+                  promotion_comp + promotion_own + adstock_comp + adstock_own |
+                store_code_uc + time_trend, data = move)
+
+# not controlling for time fixed effects
+fit_notime = felm(log(1+total_quantity_own) ~ log(price_comp) + log(price_own) +
+                    promotion_comp + promotion_own + adstock_comp + adstock_own |
+                    store_code_uc, data = move)
+
+# compare using stargazer
+stargazer(fit_base, fit_ad, fit_notime, type = "text", 
+          column.labels = c("Base", "Adstock", "No Time FE"), 
+          dep.var.labels.include = FALSE)
+
+```
+
+```{r}
+# comp grp
+# base specification
+fit_base_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) + 
+                       log(price_own) + promotion_comp + promotion_own | 
+                       store_code_uc + time_trend, data = move)
+
+# add adstock
+fit_ad_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) + 
+                     log(price_own) + promotion_comp + promotion_own + 
+                     adstock_comp + adstock_own | store_code_uc + time_trend, 
+                   data = move)
+
+# not controlling for time fixed effects
+fit_notime_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) + 
+                    log(price_own) + promotion_comp + promotion_own + 
+                    adstock_comp + adstock_own | store_code_uc, data = move)
+
+# compare using stargazer
+stargazer(fit_base_comp, fit_ad_comp, fit_notime_comp, type = "text", 
+          column.labels = c("Base", "Adstock", "No Time FE"), 
+          dep.var.labels.include = FALSE)
+```
+
+## Estimation using border strategy
+
+Lastly, we employed the border strategy discussed in class to estimate the advertising effects.
+
+### Merge border names
+
+The `stores` table contains two variables that we used for the border strategy. First, `on_border` indicates if a store is located in a county at a DMA border (`TRUE`) or not (`FALSE`). Second, for all border stores the table contains the `border_name`. Before merging, we converted the `border_name` variable to a factor representation. This saved memory and helped the `lfe` package to create fixed effects:
+
+```{r}
+# convert border_name to factor
+stores[, border_name := as.factor(border_name)]
+
+# merge border names in move table
+move = merge(move, stores[on_border == TRUE, .(store_code_uc, border_name)],
+             allow.cartesian = TRUE)
+```
+
+For the border strategy, we estimated the advertising effects based on differences in advertising exposure across two counties on one and the other side of a DMA Border. In particular, we allowed for a common time trend in these two adjacent DMA's that controlled for any organically occurring variation in demand that may be correlated with the overall advertising levels.
+
+Using the border strategy, we estimated two more models:
+
+4. Advertising model with both store fixed effects and border/time fixed effects.
+
+5. Model 4 with standard errors that are clustered at the DMA level.
+
+```{r}
+# own grp
+# add border/time fixed effects
+fit_border = felm(log(1+total_quantity_own) ~ log(price_comp) + log(price_own) + 
+                  promotion_comp + promotion_own + adstock_comp + adstock_own | 
+                    store_code_uc + border_name:time_trend, data = move)
+
+# S.E.'s clustered at the DMA level
+fit_border_cluster = felm(log(1+total_quantity_own) ~ log(price_comp) + 
+                            log(price_own) + promotion_comp + promotion_own + 
+                            adstock_comp + adstock_own | store_code_uc + 
+                            border_name:time_trend | 0 | dma_code, data = move)
+
+# compare with previous using stargazer
+stargazer(fit_ad, fit_border, fit_border_cluster, type = "text", 
+          column.labels = c("Ad", "Border", "Border Cluster"), 
+          dep.var.labels.include = FALSE)
+```
+
+```{r}
+# comp grp
+# add border/time fixed effects
+fit_border_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) + 
+                         log(price_own) + promotion_comp + promotion_own + 
+                         adstock_comp + adstock_own | store_code_uc + 
+                         border_name:time_trend, data = move)
+
+# S.E.'s clustered at the DMA level
+fit_border_cluster_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) + 
+                                 log(price_own) + promotion_comp + 
+                                 promotion_own + adstock_comp + adstock_own | 
+                                 store_code_uc + border_name:time_trend | 0 | 
+                                 dma_code, data = move)
+
+# compare with previous using stargazer
+stargazer(fit_ad_comp, fit_border_comp, fit_border_cluster_comp, type = "text", 
+          column.labels = c("Ad", "Border", "Border Cluster"), 
+          dep.var.labels.include = FALSE)
+```
 
 
