@@ -1,6 +1,6 @@
 ---
 title: "Advertising Effects"
-author: "Jack Gang"
+author: "Jack Gang, Lakshmi Jampana, Jennifer Lopez, Tommy Wu"
 date: "2/14/2017"
 output:
   pdf_document: default
@@ -19,7 +19,7 @@ knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
 
 ## Overview
 
-Our goal is to estimate own and competitive brand-level advertising effects. We combined store-level sales data from the Nielsen RMS scanner data set with DMA-level advertising exposure data from the Nielsen Ad Intel advertising data. We compared estimates based on a within-market strategy that controlled for cross-sectional heterogeneity across markets with a border strategy that exploited the discontinuity in advertising at the common border between two neighboring DMA's. This assignment replicated some results that are part of an ongoing research project with Brad Shapiro that focuses on providing a comprehensive and general overview of advertising effectiveness across a large number of brands.
+Our goal is to estimate own and competitive brand-level advertising effects. We combined store-level sales data from the Nielsen RMS scanner data set with DMA-level advertising exposure data from the Nielsen Ad Intel advertising data. We compared estimates based on a within-market strategy that controlled for cross-sectional heterogeneity across markets with a border strategy that exploited the discontinuity in advertising at the common border between two neighboring DMA’s. This assignment replicated some results that are part of an ongoing research project with Brad Shapiro that focuses on providing a comprehensive and general overview of advertising effectiveness across a large number of brands.
 
 ```{r}
 # import packages
@@ -48,6 +48,8 @@ selected_module = 8412
 # select Prilosec
 selected_brand = 621727
 ```
+
+\newpage
 
 ## Data preparation
 
@@ -102,6 +104,8 @@ move = merge(move, stores_dma[, .(store_code_uc, dma_code)],
              by = c("store_code_uc"))
 ```
 
+\newpage
+
 ### Ad Intel advertising data (`adv_DT`)
 
 Since the data did not contain observations for all DMA/week combinations during the observation period, we needed to capture that the number of GRP's was 0 for such observations:
@@ -138,6 +142,8 @@ We decided to use the sum of the direct and indirect GRP's to create a combined 
 # combine grp direct and direct
 adv_DT[, grp := grp_direct + grp_indirect]
 ```
+
+\newpage
 
 ### Calculate adstock/goodwill
 
@@ -196,6 +202,8 @@ Since the adstock variable is not defined for the first `N_lags` weeks in the da
 move = move[complete.cases(move)]
 ```
 
+\newpage
+
 ### Time trend
 
 We also created a time trend/index for each month/year combination in the data:
@@ -208,6 +216,8 @@ startMonth = month(firstWeek)
 
 move[, time_trend := 1+12*(year(week_end) - minYear)+(month(week_end)-startMonth)]
 ```
+
+\newpage
 
 ## Data inspection
 
@@ -227,6 +237,10 @@ ggplot(move[dma_code == 642], aes(week_end, grp_comp)) +
   geom_point() +
   scale_x_date("Year", date_labels = "%Y", date_breaks = "1 years", minor_breaks = NULL)
 ```
+
+From these time series, we saw that the GRP’s for Own and Comp in Lafayette, LA seem to have similar spike at 2013.
+
+\newpage
 
 ### Overall advertising variation
 
@@ -249,6 +263,10 @@ ggplot(move, aes(normalized_grp_comp)) +
   scale_y_continuous("Count", limits = c(0, 1000000))
 
 ```
+
+These histograms suggested that the brand’s competitors advertising is much more varied than its own advertising.
+
+\newpage
 
 ## Advertising effect estimation
 
@@ -278,13 +296,20 @@ fit_ad = felm(log(1+total_quantity_own) ~ log(price_comp) + log(price_own) +
 fit_notime = felm(log(1+total_quantity_own) ~ log(price_comp) + log(price_own) +
                     promotion_comp + promotion_own + adstock_comp + adstock_own |
                     store_code_uc, data = move)
+```
 
+\newpage
+
+```{r}
 # compare using stargazer
 stargazer(fit_base, fit_ad, fit_notime, type = "text", 
           column.labels = c("Base", "Adstock", "No Time FE"), 
           dep.var.labels.include = FALSE)
+remove(fit_base, fit_notime)
 
 ```
+
+\newpage
 
 ```{r}
 # comp grp
@@ -303,12 +328,19 @@ fit_ad_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) +
 fit_notime_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) + 
                     log(price_own) + promotion_comp + promotion_own + 
                     adstock_comp + adstock_own | store_code_uc, data = move)
+```
 
+\newpage
+
+```{r}
 # compare using stargazer
 stargazer(fit_base_comp, fit_ad_comp, fit_notime_comp, type = "text", 
           column.labels = c("Base", "Adstock", "No Time FE"), 
           dep.var.labels.include = FALSE)
+remove(fit_base_comp, fit_notime_comp)
 ```
+
+\newpage
 
 ## Estimation using border strategy
 
@@ -327,7 +359,7 @@ move = merge(move, stores[on_border == TRUE, .(store_code_uc, border_name)],
              allow.cartesian = TRUE)
 ```
 
-For the border strategy, we estimated the advertising effects based on differences in advertising exposure across two counties on one and the other side of a DMA Border. In particular, we allowed for a common time trend in these two adjacent DMA's that controlled for any organically occurring variation in demand that may be correlated with the overall advertising levels.
+For the border strategy, we estimated the advertising effects based on differences in advertising exposure across two counties on one and the other side of a DMA Border. In particular, we allowed for a common time trend in these two adjacent DMA’s that controlled for any organically occurring variation in demand that may be correlated with the overall advertising levels.
 
 Using the border strategy, we estimated two more models:
 
@@ -347,12 +379,18 @@ fit_border_cluster = felm(log(1+total_quantity_own) ~ log(price_comp) +
                             log(price_own) + promotion_comp + promotion_own + 
                             adstock_comp + adstock_own | store_code_uc + 
                             border_name:time_trend | 0 | dma_code, data = move)
+```
 
+\newpage
+
+```{r}
 # compare with previous using stargazer
 stargazer(fit_ad, fit_border, fit_border_cluster, type = "text", 
           column.labels = c("Ad", "Border", "Border Cluster"), 
           dep.var.labels.include = FALSE)
 ```
+
+\newpage
 
 ```{r}
 # comp grp
@@ -368,11 +406,35 @@ fit_border_cluster_comp = felm(log(1+total_quantity_comp) ~ log(price_comp) +
                                  promotion_own + adstock_comp + adstock_own | 
                                  store_code_uc + border_name:time_trend | 0 | 
                                  dma_code, data = move)
+```
 
+\newpage
+
+```{r}
 # compare with previous using stargazer
 stargazer(fit_ad_comp, fit_border_comp, fit_border_cluster_comp, type = "text", 
           column.labels = c("Ad", "Border", "Border Cluster"), 
           dep.var.labels.include = FALSE)
 ```
+
+\newpage
+
+## Summary of estimation results
+
+### Estimates
+
+#### Base Specification
+
+From the first table of estimates on the effect on own quantity, there is not much difference in estimates between Base and Adstock across all coefficients. With no time fixed effects, however, the competitor price change has a relatively small effect whereas own price change has a greater effect. This applies similarly to promotions. Another observation is that own ads (adstock own) with no fixed time effects has a slightly negative effect on own quantity.
+
+When considering Prilosec’s own advertising strategy, we saw that overestimation of higher effects of promotion could occur if organic demand is not considered. It was interesting to see that there is an increase in quantity when time effects are not controlled for. This suggests that there might be some seasonality when it comes to the consumption of Prilosec and there could be an opportunity to shift the timing of advertisements outside of those profitable seasons. If the manufacturer is spending ad dollars even when the consumer was going to make the purchase regardless, their ROI on ads decreases. However, there is high standard error so there is room to improve the model.
+
+On the other hand, when analyzing the remaining market’s advertising effects, controlling for time effects does not seem to make a difference. Adstock also does not affect quantity when controlled for. This helps support the idea that frequent advertising could lead to no effect in purchases within the antacid category. 
+
+#### Border Strategy
+
+For the effect on our own quantity, the own price change has little improvement when comparing the border strategy with the base estimation. On the other hand, own promotions, competitor price change, competitor ads show stronger effects. Interestingly, own ads shows low effect in the border strategy than the base estimation. The standard errors increased with the clustered standard errors, and as a result, comp promotions no longer had a statistically significant impact on the model.
+
+Utilizing the border strategy from Prilosec’s point of view reflects barely increases in organic demand in border markets that are correlated with differences in advertising. The standard error is high, which could be improved if we use time effects for somewhat longer time periods such as quarterly fixed effects rather than monthly. However, advertising effects in border markets may not be entirely representative of the overall advertising effects. Analyzing the remaining antacid market’s point of view reflects small, differential decreases in organic demand in border markets that are correlated with differences in advertising in such markets. The standard error is actually reduced to 0.498 which could suggest a better model. Perhaps we could change our models by adjusting the adstock rates since we included both direct and indirect effects. This could give us a better picture of how relevant advertising is when it comes to consumers making a choice between different antacids, and ultimately help Prilosec best allocate their funding throughout the year. 
 
 
