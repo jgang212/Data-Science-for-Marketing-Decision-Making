@@ -1,0 +1,135 @@
+---
+title: "Churn Management"
+author: "Jack Gang"
+date: "2/21/2017"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+```{r}
+# import packages
+library(bit64)
+library(data.table)
+library(ggplot2)
+library(broom)
+library(knitr)
+library(Hmisc)
+```
+
+## Overview
+
+Cell2Cell is a wireless telecom company that attempts to mitigate customer churn. Our goal is to develop a model to predict customer churn at Cell2Cell and use the insights from the model to develop a targeted incentive plan to lower the rate at which customers churn.
+
+We will address these key issues:
+
+1. Is customer churn at Cell2Cell predictable from the customer information that Cell2Cell maintains?
+
+2. What factors drive customer churn? Which factors are particularly important?
+
+3. What incentives should Cell2Cell offer to prevent customer churn?
+
+4. What is the economic value of a proposed targeted plan to prevent churn, and how does this value differ across customer segments? Compare the economic value to an incentive with a cost of $100 and another incentive with a cost of $175. Which customers segments should receive the incentive? Does the answer depend on the success probability?
+
+## Data
+
+We first loaded the data from the file and inspected it:
+
+```{r}
+# import data from Cell2Cell.RData
+load("/classes/37105/main/Assignment-5/Cell2Cell.RData")
+
+# inspect the data - verify oversampling
+head(cell2cell_DT)
+paste("validation data count:", nrow(cell2cell_DT[calibrat == 0]))
+paste("validation churn rate:", nrow(cell2cell_DT[calibrat == 0 & churn == 1])/
+        nrow(cell2cell_DT[calibrat == 0]))
+paste("training data count:", nrow(cell2cell_DT[calibrat == 1]))
+paste("training churn rate:", nrow(cell2cell_DT[calibrat == 1 & churn == 1])/
+        nrow(cell2cell_DT[calibrat == 1]))
+```
+
+We then removed any observations with missing values before conducting the main analysis:
+
+```{r}
+# keep only complete data
+cell2cell_DT = cell2cell_DT[complete.cases(cell2cell_DT)]
+```
+
+## Model estimation
+
+Using this data, we estimated a logit model to predict the conditional churn probability and displayed the results:
+
+```{r}
+# logit model for conditional churn probability
+fit = glm(churn ~ . - calibrat, family=binomial(), 
+          data=cell2cell_DT[calibrat == 1])
+
+# show regression output in the form of a data.table
+results_DT = as.data.table(tidy(fit))
+kable(results_DT, digits = 5)
+```
+
+## Prediction: Accounting for oversampling
+
+Because we used oversampling in the training data, in order to de-bias the scale of churn in the validation sample, we needed to supply an offset variable to the logistic regression model:
+
+```{r}
+# calculate average churn rates in two samples
+churn_rate_val = nrow(cell2cell_DT[calibrat == 0 & churn == 1]) /
+        nrow(cell2cell_DT[calibrat == 0])
+churn_rate_train = nrow(cell2cell_DT[calibrat == 1 & churn == 1]) /
+        nrow(cell2cell_DT[calibrat == 1])
+
+# create offset variable
+offset_var = (log(churn_rate_train) - log(1-churn_rate_train)) - 
+  (log(churn_rate_val) - log(1-churn_rate_val))
+
+# add offset_var to dataset
+cell2cell_DT[, offset_var := offset_var]
+```
+
+We then re-estimated the logistic regression with this `'offset_var`:
+
+```{r}
+# logit model for conditional churn probability with offset
+fit_offset = glm(churn ~ . - calibrat + offset(offset_var), family=binomial(), 
+                 data=cell2cell_DT[calibrat == 1])
+
+# show regression output in the form of a data.table
+results_offset_DT = as.data.table(tidy(fit_offset))
+kable(results_offset_DT, digits = 5)
+
+```
+
+Finally, we predicted the churn rate in the validation sample and compared with the actual validation churn rate:
+
+```{r}
+# predict churn rate in validation sample
+cell2cell_DT[calibrat == 0]$offset_var = 0
+churn_prob = predict(fit_offset, newdata=cell2cell_DT[calibrat == 0], 
+                     type="response")
+
+# compare average predicted churn rate with validation
+paste("predicted churn rate:", mean(churn_prob))
+paste("validation churn rate:", churn_rate_val)
+```
+
+
+## Predictive power: Lift
+
+
+
+
+
+
