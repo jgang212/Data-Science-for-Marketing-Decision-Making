@@ -125,8 +125,94 @@ paste("predicted churn rate:", mean(churn_prob))
 paste("validation churn rate:", churn_rate_val)
 ```
 
-
 ## Predictive power: Lift
+
+We then evaluated the predictive fit of the logistic regression model using a lift table and lift chart. We developed a `liftTable` function that takes the following inputs:
+
+   - Predicted outcome or score
+   - Observed outcome
+   - Number of segments to be created based on the score
+   
+and returns a `data.table` that contains:
+
+   - An index (`score_group`) for each segment that was created based on the score
+   - The average score value (predicted outcome) in the `score_group`
+   - The average observed outcome in the `score_group`
+   - A lower and upper bound for a 95 percent confidence interval for the average observed outcome
+   - The lift factor
+
+```{r}
+# liftTable function
+liftTable <- function(pred, val, seg)
+{
+    # build data.table
+    lt = data.table(val)
+    lt[, predict := pred]
+    
+    # group segments
+    lt[, group := cut_number(predict, n = seg)]
+    lt[, score_group := as.integer(group)]
+    
+    # average prediction and observed in each segment
+    lt_agg = lt[, .(pred_avg = mean(predict), val_avg = mean(val), 
+                    val_churn = length(val[val==1]), val_all = length(val)),
+                keyby = .(score_group)]
+    
+    # 95% confidence interval for observed
+    lt_agg$conf_low = 0.0
+    lt_agg$conf_up = 0.0
+    for (i in 1:nrow(lt_agg))
+    {
+      lt_agg[i]$conf_low = binconf(lt_agg[i]$val_churn, lt_agg[i]$val_all, 
+                                 alpha = 0.05)[2]
+      lt_agg[i]$conf_up = binconf(lt_agg[i]$val_churn, lt_agg[i]$val_all, 
+                                 alpha = 0.05)[3]
+    }
+    lt_agg$val_churn = NULL
+    lt_agg$val_all = NULL
+
+    # lift factor
+    lt_agg[, lift_factor := 100 * val_avg / churn_rate_val]
+    
+    return(lt_agg)
+}
+
+# calculate lift table
+lt = liftTable(churn_prob, cell2cell_DT[calibrat == 0]$churn, 20)
+```
+
+Next, we inspected the resulting lift table and plotted churn rate vs. `score_group` as well as lift factor vs. `score_group`:
+
+```{r}
+# inspect lift table
+lt
+
+# plot churn rate vs. score_group with 95% CIs
+ggplot(lt, aes(score_group, val_avg)) + 
+  geom_line() + 
+  geom_point() + 
+  geom_errorbar(aes(ymin=conf_low, ymax=conf_up), width=.25) +
+  scale_x_continuous("Segment", limits = c(1, 20), breaks = seq(0, 20, 1)) +
+  scale_y_continuous("Churn Rate", limits = c(0, 0.05), breaks = seq(0, 0.05, 0.005))
+
+# plot lift factor vs score_group
+ggplot(lt, aes(score_group, lift_factor)) + 
+  geom_line() + 
+  geom_point() + 
+  geom_hline(yintercept = 100, color = "midnightblue") +
+  scale_x_continuous("Segment", limits = c(1, 20), breaks = seq(0, 20, 1)) +
+  scale_y_continuous("Lift Factor", limits = c(0, 200), breaks = seq(0, 200, 25))
+```
+
+## Why do customers churn? - Effect sizes
+
+
+
+
+
+
+
+
 
 
 
