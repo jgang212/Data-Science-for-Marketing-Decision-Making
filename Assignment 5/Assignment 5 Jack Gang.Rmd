@@ -206,14 +206,154 @@ ggplot(lt, aes(score_group, lift_factor)) +
 
 ## Why do customers churn? - Effect sizes
 
+To understand why customers churn, we translated the logistic regression estimates into easily interpretable effect sizes for all inputs. We created a `data.table` that contains the predicted effect sizes, their standard deviations, and whether they are dummy variables:
 
+```{r}
+# add marginal_effect column to results_DT
+results_offset_DT[, marginal_effect := estimate*mean(churn_prob)*
+                    (1 - mean(churn_prob))]
 
+# calculate standard deviation for all variables in the data
+sd_ = cell2cell_DT[, lapply(.SD, sd)]
+sd_DT = data.table(term = names(sd_), std_dev = c(t(sd_)))
+sd_DT = sd_DT[term != "calibrat" & term != "churn" & term != "offset_var"]
 
+# merge results and standard deviations
+results_SD_DT = merge(results_offset_DT, sd_DT[, .(term, std_dev)], 
+                      by = c("term"), all.x = TRUE)
 
+# add dummy variable column and effect sizes on probability
+results_SD_DT[, isDummy := 0]
+results_SD_DT[, changeProb := 0.0]
+for (i in 1:nrow(results_SD_DT))
+{
+  if (results_SD_DT[i]$term != "(Intercept)")
+  {
+    if ((length(unique(cell2cell_DT[[results_SD_DT[i]$term]])) == 2) & 
+      match(0, unique(cell2cell_DT[[results_SD_DT[i]$term]])) &
+      match(1, unique(cell2cell_DT[[results_SD_DT[i]$term]])))
+    {
+      results_SD_DT[i]$isDummy = 1
+      results_SD_DT[i]$changeProb = results_SD_DT[i]$marginal_effect
+    }
+    else
+    {
+      results_SD_DT[i]$changeProb = results_SD_DT[i]$marginal_effect * 
+        results_SD_DT[i]$std_dev
+    }
+  }
+}
+```
 
+## Economics of churn management
 
+We want to predict the value of a proposed churn management program in order to assess the maximum amount that we would spend to prevent a customer from churning for one year. 
 
+The prediction depended on several parameters and assumptions. We considered a planning horizon of 6 years (the current year and five additional years), and an annual discount rate of 10 percent. Also, we predicted the churn management value for 10 groups. We assumed a industry profit margin of 38% of the revenue.
 
+Also, we predicted the program value for ten customer segments based on the predicted churn rate. We created these segments based on the validation sample data. We predicted current and future customer profits at the year-level. Hence, we also needed to convert both the monthly churn rate and the revenue data to the year-level.
+
+We compared the economic value of a churn management program with success probability gammas of 0.25 and 0.5:
+
+```{r}
+# parameters
+numGroups = 10
+discountRate = 0.1
+gamma1 = 0.25
+gamma2 = 0.5
+margin = 0.38
+
+# filter for validation data
+valData = data.table(cell2cell_DT[calibrat == 0]$revenue)
+names(valData)[1]<-"revenue"
+valData[, predict := churn_prob]
+    
+# group segments
+valData[, group := cut_number(predict, n = numGroups)]
+valData[, score_group := as.integer(group)]
+    
+# aggregate data to annual churn and annual revenue
+valData_agg = valData[, .(numCust = sum(revenue)/mean(revenue), 
+                          annual_churn = 1-(1-mean(predict))^12, 
+                          revenue_total = sum(revenue)*12*margin),
+                      keyby = .(score_group)]
+    
+# calculate 5 years baseline revenue and LTV
+names(valData_agg)[4]<-"year0_revenue"
+valData_agg[, year1_baseline_rev := year0_revenue*(1-annual_churn)]
+valData_agg[, year2_baseline_rev := year1_baseline_rev*(1-annual_churn)]
+valData_agg[, year3_baseline_rev := year2_baseline_rev*(1-annual_churn)]
+valData_agg[, year4_baseline_rev := year3_baseline_rev*(1-annual_churn)]
+valData_agg[, year5_baseline_rev := year4_baseline_rev*(1-annual_churn)]
+valData_agg[, LTV_baseline := year0_revenue + 
+              year1_baseline_rev / (1+discountRate) + 
+              year2_baseline_rev / (1+discountRate)^2 + 
+              year3_baseline_rev / (1+discountRate)^3 + 
+              year4_baseline_rev / (1+discountRate)^4 + 
+              year5_baseline_rev / (1+discountRate)^5]
+    
+# calculate 5 years gamma=0.25 revenue and LTV
+valData_agg[, year1_r1_rev := year0_revenue*(1-annual_churn*(1-gamma1))]
+valData_agg[, year2_r1_rev := year1_r1_rev*(1-annual_churn*(1-gamma1))]
+valData_agg[, year3_r1_rev := year2_r1_rev*(1-annual_churn*(1-gamma1))]
+valData_agg[, year4_r1_rev := year3_r1_rev*(1-annual_churn*(1-gamma1))]
+valData_agg[, year5_r1_rev := year4_r1_rev*(1-annual_churn*(1-gamma1))]
+valData_agg[, LTV_r1 := year0_revenue + 
+              year1_r1_rev / (1+discountRate) + 
+              year2_r1_rev / (1+discountRate)^2 + 
+              year3_r1_rev / (1+discountRate)^3 + 
+              year4_r1_rev / (1+discountRate)^4 + 
+              year5_r1_rev / (1+discountRate)^5]
+
+# calculate 5 years gamma=0.5 revenue and LTV
+valData_agg[, year1_r2_rev := year0_revenue*(1-annual_churn*(1-gamma2))]
+valData_agg[, year2_r2_rev := year1_r2_rev*(1-annual_churn*(1-gamma2))]
+valData_agg[, year3_r2_rev := year2_r2_rev*(1-annual_churn*(1-gamma2))]
+valData_agg[, year4_r2_rev := year3_r2_rev*(1-annual_churn*(1-gamma2))]
+valData_agg[, year5_r2_rev := year4_r2_rev*(1-annual_churn*(1-gamma2))]
+valData_agg[, LTV_r2 := year0_revenue + 
+              year1_r2_rev / (1+discountRate) + 
+              year2_r2_rev / (1+discountRate)^2 + 
+              year3_r2_rev / (1+discountRate)^3 + 
+              year4_r2_rev / (1+discountRate)^4 + 
+              year5_r2_rev / (1+discountRate)^5]
+    
+# comparison
+revTable = valData_agg[,.(numCust,score_group,LTV_baseline,LTV_r1,LTV_r2)]
+revTable[, gamma1_value := LTV_r1 - LTV_baseline]
+revTable[, gamma2_value := LTV_r2 - LTV_baseline]
+
+# add $100 and $175 incentives
+revTable[, incCost100 := 100*numCust]
+revTable[, incCost175 := 175*numCust]
+revTable[, ROI_inc100gamma1 := (gamma1_value - incCost100) / incCost100]
+revTable[, ROI_inc100gamma2 := (gamma2_value - incCost100) / incCost100]
+revTable[, ROI_inc175gamma1 := (gamma1_value - incCost175) / incCost175]
+revTable[, ROI_inc175gamma2 := (gamma2_value - incCost175) / incCost175]
+
+print(revTable)
+
+```
+
+## Summarize your main results
+
+Customer churn at Cell2Cell seems to be predictable from the customer information that Cell2Cell maintains. We can see this in the relatively steep lift chart above, indicating that we can segment the customers into groups that are relatively more likely to churn.
+
+Looking at the `results_SD_DT` table, we saw that the top five factors that impact the probability of customer churn (that are statistically significant) are:
+
+1. The number of calls the customer previously made to retention team (more is higher churn)
+2. Whether the customer has a high credit rating (true is lower churn)
+3. The number of days the customer has the current equipment (longer is higher churn)
+4. If the customer's occupation is homemaker (true is higher churn)
+5. Months the customer is in service (longer is lower churn)
+
+Of these, the first two are particularly important, since for each standard deviation the customer is above the mean in terms of customer retention calls, their churn probability increases by 1.5%. In addition, if the customer has a high credit rating, their churn probability decrease by nearly 0.7%.
+
+It's difficult to offer an incentive for the retention calls factor, since at that point, the customer is probably already considering churning and ideally, we want to incentivize them to stay before that. Similarly, we can't really impact the customer's credit rating since that is outside of our control and is not really a causal relationship (a lower credit rating might really indicate that they can't pay off their debt, so they'll cancel their subscriptions).
+
+For #3, we can attempt the following incentive. Since the longer the customer's had his/her current equipment, the more likely the customer will churn, we want to incentivize customers to obtain new equipment. Generally, this would cost the customer to upgrade their phone/equipment, so we want to subsidize that for customers that have had their phone for longer than average. One strategy would be to offer limited-time offers for these particular customers to upgrade their phones for 25% off, or to offer longer-term financing options with lower interest rates for new phones.
+
+4. What is the economic value of a proposed targeted plan to prevent churn, and how does this value differ across customer segments? Compare the economic value to an incentive with a cost of $100 and another incentive with a cost of $175. Which customers segments should receive the incentive? Does the answer depend on the success probability?
 
 
 
