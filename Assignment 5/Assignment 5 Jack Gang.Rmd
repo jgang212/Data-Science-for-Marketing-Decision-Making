@@ -1,6 +1,6 @@
 ---
 title: "Churn Management"
-author: "Jack Gang"
+author: "Jack Gang, Lakshmi Jampana, Jennifer Lopez, Tommy Wu"
 date: "2/21/2017"
 output:
   pdf_document: default
@@ -41,6 +41,8 @@ We will address these key issues:
 
 4. What is the economic value of a proposed targeted plan to prevent churn, and how does this value differ across customer segments? Compare the economic value to an incentive with a cost of $100 and another incentive with a cost of $175. Which customers segments should receive the incentive? Does the answer depend on the success probability?
 
+\newpage
+
 ## Data
 
 We first loaded the data from the file and inspected it:
@@ -66,6 +68,8 @@ We then removed any observations with missing values before conducting the main 
 cell2cell_DT = cell2cell_DT[complete.cases(cell2cell_DT)]
 ```
 
+\newpage
+
 ## Model estimation
 
 Using this data, we estimated a logit model to predict the conditional churn probability and displayed the results:
@@ -79,6 +83,8 @@ fit = glm(churn ~ . - calibrat, family=binomial(),
 results_DT = as.data.table(tidy(fit))
 kable(results_DT, digits = 5)
 ```
+
+\newpage
 
 ## Prediction: Accounting for oversampling
 
@@ -112,6 +118,8 @@ kable(results_offset_DT, digits = 5)
 
 ```
 
+\newpage
+
 Finally, we predicted the churn rate in the validation sample and compared with the actual validation churn rate:
 
 ```{r}
@@ -124,6 +132,8 @@ churn_prob = predict(fit_offset, newdata=cell2cell_DT[calibrat == 0],
 paste("predicted churn rate:", mean(churn_prob))
 paste("validation churn rate:", churn_rate_val)
 ```
+
+\newpage
 
 ## Predictive power: Lift
 
@@ -204,6 +214,8 @@ ggplot(lt, aes(score_group, lift_factor)) +
   scale_y_continuous("Lift Factor", limits = c(0, 200), breaks = seq(0, 200, 25))
 ```
 
+\newpage
+
 ## Why do customers churn? - Effect sizes
 
 To understand why customers churn, we translated the logistic regression estimates into easily interpretable effect sizes for all inputs. We created a `data.table` that contains the predicted effect sizes, their standard deviations, and whether they are dummy variables:
@@ -244,6 +256,8 @@ for (i in 1:nrow(results_SD_DT))
   }
 }
 ```
+
+\newpage
 
 ## Economics of churn management
 
@@ -330,10 +344,16 @@ revTable[, ROI_inc100gamma1 := (gamma1_value - incCost100) / incCost100]
 revTable[, ROI_inc100gamma2 := (gamma2_value - incCost100) / incCost100]
 revTable[, ROI_inc175gamma1 := (gamma1_value - incCost175) / incCost175]
 revTable[, ROI_inc175gamma2 := (gamma2_value - incCost175) / incCost175]
+```
 
+\newpage
+
+```{r}
 print(revTable)
 
 ```
+
+\newpage
 
 ## Summarize your main results
 
@@ -353,7 +373,7 @@ It's difficult to offer an incentive for the retention calls factor, since at th
 
 For #3, we can attempt the following incentive. Since the longer the customer's had his/her current equipment, the more likely the customer will churn, we want to incentivize customers to obtain new equipment. Generally, this would cost the customer to upgrade their phone/equipment, so we want to subsidize that for customers that have had their phone for longer than average. One strategy would be to offer limited-time offers for these particular customers to upgrade their phones for 25% off, or to offer longer-term financing options with lower interest rates for new phones.
 
-4. What is the economic value of a proposed targeted plan to prevent churn, and how does this value differ across customer segments? Compare the economic value to an incentive with a cost of $100 and another incentive with a cost of $175. Which customers segments should receive the incentive? Does the answer depend on the success probability?
+The economic value of a proposed target plan to prevent churn is highest when the incentive costs are $100 and the success of probability is 50%. Once the success rate falls to 25%, the ROI becomes negative for all types of customers except for group 10. If the wireless company is concerned about reaching a 50% success rate, we recommend a trial of the $100 incentive on groups 9 and 10. These groups have ROI at -5% or better even if the success rate is only 25%. This conservative approach would help identify the best churn management strategy for the firm.
 
 
 
