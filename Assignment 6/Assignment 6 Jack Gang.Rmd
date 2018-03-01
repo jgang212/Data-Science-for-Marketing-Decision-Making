@@ -1,0 +1,470 @@
+---
+title: "CRM and Machine Learning"
+author: "Jack Gang, Lakshmi Jampana, Jennifer Lopez, Tommy Wu"
+date: "2/28/2017"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+```{r}
+# import packages
+library(bit64)
+library(data.table)
+library(glmnet)
+library(ranger)
+library(ggplot2)
+library(corrplot)
+library(knitr)
+```
+
+## Data
+
+First, we loaded the customer data and split it 50/50 into training and validation samples. 
+
+```{r}
+# load crm_DT data.table
+load("/classes/37105/main/Assignment-6/Customer-Development-2015.RData")
+
+# split data into training and validation samples
+set.seed(1999)
+crm_DT[, training_sample := rbinom(nrow(crm_DT), 1, 0.5)]
+```
+
+## Data inspection
+
+We first analyzed some key aspects of the `outcome_spend` variable:
+
+```{r}
+# purchase incidence
+paste("purchase incidence: ", nrow(crm_DT[outcome_spend!=0])/nrow(crm_DT))
+
+# distribution of dollar spending - all
+summary(crm_DT$outcome_spend)
+
+# distribution of dollar spending given purchase
+summary(crm_DT[outcome_spend!=0]$outcome_spend)
+
+# histogram of dollar spending given purchase
+ggplot(crm_DT[outcome_spend!=0], aes(outcome_spend)) + 
+  geom_histogram() + scale_x_continuous("outcome_spend given purchase", 
+                                        limits = c(0, 1500)) +
+  scale_y_continuous("Count", limits = c(-1, 10000))
+```
+
+## Data pre-processing
+
+Given that `crm_DT` has a large number of features, we want to eliminate some highly correlated variables from the data set. First we calculated a matrix of correlation coefficients among all inputs:
+
+```{r}
+# correlation matrix of features
+cor_matrix = cor(crm_DT[, !c("customer_id", "mailing_indicator", "outcome_spend"),
+with = FALSE])
+```
+
+Next, we created a pdf file to visualize the correlation among all variables in two separate graphs:
+
+```{r}
+# create visualization of all variables' correlations
+pdf("Correlation-Matrix.pdf", height = 16, width = 16)
+corrplot(cor_matrix, method = "color",
+type = "lower", diag = FALSE,
+tl.cex = 0.4, tl.col = "gray10")
+corrplot(cor_matrix, method = "number", number.cex = 0.25, addgrid.col = NA,
+type = "lower", diag = FALSE,
+tl.cex = 0.4, tl.col = "gray10")
+dev.off()
+```
+
+We then created a data table that contains the correlations for all variable pairs:
+
+```{r}
+# correlation data table
+cor_matrix[upper.tri(cor_matrix, diag = TRUE)] = NA
+cor_DT = data.table(row = rep(rownames(cor_matrix), ncol(cor_matrix)),
+col = rep(colnames(cor_matrix), each = ncol(cor_matrix)),
+cor = as.vector(cor_matrix))
+cor_DT = cor_DT[is.na(cor) == FALSE]
+```
+
+Finally, we found all correlations larger than 0.95 in absolute value. We inspected these correlations and eliminated one of the virtually redundant variables in each highly correlated pair from the data set:
+
+```{r}
+# find all correlations larger than 0.95 in absolute value
+large_cor_DT = cor_DT[abs(cor) > 0.95]
+kable(large_cor_DT, digits = 4)
+
+# eliminate redundant varialbes in the row column
+crm_DT = crm_DT[, !large_cor_DT$row, with = FALSE]
+```
+
+## Predictive model estimation
+
+We used the training sample to estimate the conditional expectation of dollar spending, based on all available customer information. We estimated the model only for customers who were targeted, such that `mailing_indicator` takes the value `1`. Hence, we estimated models that predict expected dollar spending, conditional on all customer features and conditional on being targeted:
+
+```{r}
+# isolate training dataset
+crm_DT_train = crm_DT[training_sample == 1 & mailing_indicator == 1]
+
+# OLS model
+ols_fit = lm(outcome_spend ~ . - mailing_indicator - training_sample, 
+            data = crm_DT_train)
+
+# collect results
+results = data.table(input =rownames(summary(ols_fit)$coefficients), 
+                     est_OLS = summary(ols_fit)$coefficients[, 1],
+                     p_OLS   = summary(ols_fit)$coefficients[, 4])
+
+# LASSO
+x = model.matrix(outcome_spend ~ 0 + . - mailing_indicator - training_sample, 
+                 data = crm_DT_train)
+y = crm_DT_train$outcome_spend
+
+lasso_fit = glmnet(x, y)
+plot(lasso_fit, xvar = "lambda")
+
+cv_lasso_fit = cv.glmnet(x, y)
+cv_lasso_fit$lambda.min
+cv_lasso_fit$lambda.1se
+
+results[, est_LASSO := coef(cv_lasso_fit, s = "lambda.min")[,1]]
+results[, est_LASSO_1se := coef(cv_lasso_fit, s = "lambda.1se")[,1]]
+coef(cv_lasso_fit, s = "lambda.min")
+plot(cv_lasso_fit)
+
+# Elastic net - tune the alpha parameter
+set.seed(1999)
+
+folds = sample(1:10, nrow(crm_DT_train), replace = TRUE)
+mse_DT = data.table(alpha = seq(0, 1, by = 0.05), mean_cv_error = rep(0, 21))
+
+# commented out to knit
+
+#for(i in 0:20)
+#{
+#  cv_i = cv.glmnet(x, y, alpha = mse_DT[i+1, alpha], foldid = folds)
+#  mse_DT[i+1, mean_cv_error:= min(cv_i$cvm)]
+#  cat("Iteration", i, " CV error:", mse_DT[i+1, mean_cv_error], "\n")
+#}
+
+#index_min = which.min(mse_DT$mean_cv_error)
+#bestAlpha = mse_DT[index_min, alpha][1]
+
+bestAlpha = 0.05
+
+net_fit = glmnet(x, y, alpha = bestAlpha)
+plot(net_fit, xvar = "lambda")
+
+cv_net_fit = cv.glmnet(x, y, alpha = bestAlpha)
+cv_net_fit$lambda.min
+cv_net_fit$lambda.1se
+
+results[, est_net := coef(cv_net_fit, s = "lambda.min")[,1]]
+results[, est_net_1se := coef(cv_net_fit, s = "lambda.1se")[,1]]
+coef(cv_net_fit, s = "lambda.min")
+plot(cv_net_fit)
+
+# Random forest
+crm_DT_train = crm_DT_train[complete.cases(crm_DT_train)]
+
+rforest_fit = ranger(outcome_spend ~ ., 
+                     data = crm_DT_train[, !c("mailing_indicator", 
+                                              "training_sample"), 
+                                         with = FALSE], 
+                     num.trees = 2000, seed = 1776)
+
+```
+
+For OLS, we of course had estimated coefficients for all of the inputs (147 features, since the intercept is excluded). LASSO, on the other hand, only selected 65 features (6 with 1 SE lambda). For elastic net, using a step size of 0.05 between 0 and 1 for the `alpha` value, we settled on an `alpha` of 0.05, and with this, the elastic net selected 70 features (17 with 1 SE lambda). The coefficient values passed a quick sanity test in that the vast majority of them, regardless of whether they used OLS, LASSO, or elastic net, had the same sign and were relatively close in value to each other.
+
+## Model validation
+
+We used the validation sample to compare the observed and predicted sales outcomes of our models. First, we compared the MSE based on the predictions of the four estimation methods:
+
+```{r}
+# isolate validation dataset
+crm_DT_val = crm_DT[training_sample == 0 & mailing_indicator == 1]
+x_val = model.matrix(outcome_spend ~ 0 + . - mailing_indicator - training_sample,
+                     data = crm_DT_val)
+y_val = crm_DT_val$outcome_spend
+
+# compare MSE
+pred_y_OLS = predict(ols_fit, newdata = crm_DT_val)
+mse_OLS = mean((y_val - pred_y_OLS)^2)
+
+pred_y_LASSO = predict(cv_lasso_fit, newx = x_val, s = "lambda.min")
+mse_LASSO = mean((y_val - pred_y_LASSO)^2)
+
+pred_y_net = predict(cv_net_fit, newx = x_val, s = "lambda.min")
+mse_net = mean((y_val - pred_y_net)^2)
+
+pred_y_forest = predict(rforest_fit, data = crm_DT_val)
+mse_forest = mean((y_val - pred_y_forest$predictions)^2)
+
+paste("OLS MSE:", mse_OLS)
+paste("LASSO MSE:", mse_LASSO)
+paste("Net MSE:", mse_net)
+paste("Random Forest MSE:", mse_forest)
+
+
+```
+
+From these results, it looks like our elastic net with alpha = 0.05 model has the lowest MSE and the Random Forest has the highest MSE.
+
+Second, we created lift tables and charts, plotted the lifts, and compared the lift tables:
+
+```{r}
+# lift table function
+liftTable <- function(pred, val, seg)
+{
+    # build data.table
+    lt = data.table(val)
+    lt[, predict := pred]
+    
+    # group segments
+    lt[, group := cut_number(predict, n = seg)]
+    lt[, score_group := as.integer(group)]
+    
+    # average prediction and observed in each segment
+    lt_agg = lt[, .(pred_avg = mean(predict), val_avg = mean(val),
+                    stdev = sd(val), N = .N), keyby = .(score_group)]
+    
+    # 95% confidence interval for observed
+    lt_agg[, std_error := stdev/sqrt(N)]
+    lt_agg[, `:=`(conf_low = val_avg + qnorm(0.025)*std_error,
+                  conf_up = val_avg + qnorm(0.975)*std_error)]
+    #lt_agg[, c("std_error", "N") := NULL]
+
+    # lift factor
+    lt_agg[, lift_factor := 100 * val_avg / mean(val)]
+    
+    return(lt_agg)
+}
+
+# calculate lift tables
+lt_OLS = liftTable(pred_y_OLS, y_val, 20)
+lt_LASSO = liftTable(pred_y_LASSO, y_val, 20)
+lt_net = liftTable(pred_y_net, y_val, 20)
+lt_forest = liftTable(pred_y_forest$predictions, y_val, 20)
+
+# plot lifts with confidence intervals
+ggplot(lt_OLS,aes(x = score_group, y = val_avg)) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_up), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("OLS spend") +
+  theme_bw()
+
+ggplot(lt_OLS,aes(x = score_group, y = lift_factor)) +
+  geom_hline(yintercept = 100, color = "lightblue3") +
+  geom_line(color = "gray80", size = 0.5) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("OLS lift") +
+  theme_bw()
+
+ggplot(lt_LASSO,aes(x = score_group, y = val_avg)) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_up), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("LASSO spend") +
+  theme_bw()
+
+ggplot(lt_LASSO,aes(x = score_group, y = lift_factor)) +
+  geom_hline(yintercept = 100, color = "lightblue3") +
+  geom_line(color = "gray80", size = 0.5) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("LASSO lift") +
+  theme_bw()
+
+ggplot(lt_net,aes(x = score_group, y = val_avg)) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_up), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("Net spend") +
+  theme_bw()
+
+ggplot(lt_net,aes(x = score_group, y = lift_factor)) +
+  geom_hline(yintercept = 100, color = "lightblue3") +
+  geom_line(color = "gray80", size = 0.5) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("Net lift") +
+  theme_bw()
+
+ggplot(lt_forest,aes(x = score_group, y = val_avg)) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_up), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("RForest spend") +
+  theme_bw()
+
+ggplot(lt_forest,aes(x = score_group, y = lift_factor)) +
+  geom_hline(yintercept = 100, color = "lightblue3") +
+  geom_line(color = "gray80", size = 0.5) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("RForest lift") +
+  theme_bw()
+```
+
+Overall, all of the models have a similar MSE, with the random forest model having a slightly higher error. In terms of lift, all of the models seem to recommend targeting groups 16 through 20, with the elastic net model also including group 15. For each model, the confidence interval on the `outcome_spend` in each group grows wider as we move toward the higher-spending groups, but this is expected.
+
+## Traditional targeting profit prediction
+
+Next, we worked with the whole validation sample, including customers who were targeted and customers who were not targeted. We used the elastic net model with a tuned `alpha` since it had the lowest MSE of our four models. We predicted expected dollar spending for all customers in the validation sample and assumed that spending is zero whenever a customer is not targeted; this way, we are able to predict the expected targeting profit for each customer in the validation sample:
+
+```{r}
+# margin and cost data
+margin = 0.325
+cost = 0.99
+
+# predict expected dollar spending
+crm_DT_val = crm_DT[training_sample == 0]
+x_val = model.matrix(outcome_spend ~ 0 + . - mailing_indicator - training_sample,
+                     data = crm_DT_val)
+y_val = crm_DT_val$outcome_spend
+pred_y_net = predict(cv_net_fit, newx = x_val, s = "lambda.min")
+
+# attach mailing_indicator
+pred_DT = data.table(pred_y_net)
+pred_DT = cbind(pred_DT, crm_DT_val$mailing_indicator)
+setnames(pred_DT, "1", "pred_spend")
+setnames(pred_DT, "V2", "mailing_indicator")
+
+# calculate profit per customer
+pred_DT[, targeted_spend := ifelse(mailing_indicator == 1, pred_spend, 0)]
+pred_DT[, profit := targeted_spend * margin - cost]
+
+# find % of customers who should be targeted
+paste("target %:", 100 * nrow(pred_DT[profit > 0]) / nrow(pred_DT))
+```
+
+## Targeting profit evaluation in a randomized sample
+
+Since the catalog-mailing in the development sample was randomized, we used the randomized treatment assignment to predict the average treatment effect of targeting and to evaluate the profits from a specific targeting strategy without assuming that customers do not spend when not being targeted.
+
+### Average treatment effect of targeting
+
+We compared mean spending for the customers who were targeted with the mean spending of customers who were not targeted. In particular, we checked if spending really is zero if a customer was not targeted by looking at the difference in mean spending between the treated and untreated customers (ATE):
+
+```{r}
+# calculate confidence interval and t-statistic for ATE
+t.test(outcome_spend ~ mailing_indicator, data = crm_DT, conf.level = 0.95)
+
+```
+
+### Targeting profit evaluation
+
+We then designed a strategy to exploit the randomized treatment assignment to evaluate targeting profits. First, we predicted expected customer spending (or expected profits) when being targeted as before. However, we no longer assumed that the predicted spending or profit is incremental. Rather, we thought of the predicted spending variable as a score, where higher values of the score corresponded to more desirable (profitable) customers without directly interpreting the quantitative value of the score:
+
+```{r}
+# predict expected customer profits
+x_val = model.matrix(outcome_spend ~ 0 + . - mailing_indicator - training_sample,
+                     data = crm_DT)
+y_val = crm_DT$outcome_spend
+pred_y_net = predict(cv_net_fit, newx = x_val, s = "lambda.min")
+
+# attach mailing_indicator
+pred_DT = data.table(pred_y_net)
+pred_DT = cbind(pred_DT, crm_DT$mailing_indicator)
+setnames(pred_DT, "1", "pred_spend")
+setnames(pred_DT, "V2", "mailing_indicator")
+
+# calculate profit per customer
+pred_DT[, targeted_spend := ifelse(mailing_indicator == 1, pred_spend, 0)]
+pred_DT[, profit := targeted_spend * margin - cost]
+```
+
+Second, we designed a function to evaluate the profit when targeting the "top" n percent of customers, i.e. the n percent of customers with the largest score values:
+
+```{r}
+# use pred_DT from above for first step
+pred_DT[, profit := pred_spend * margin - cost]
+
+# evaluate profit when targeting top n percent of customers
+top_percent = seq(from = 0, to = 1, by = 0.01)
+
+predictProfitTopPercent <- function(top_percent, score, W, spend, margin, cost)
+{
+  mean_profits = vector(mode="numeric", length = length(top_percent))
+  mean_not_profits = vector(mode="numeric", length = length(top_percent))
+  profits_DT = data.table(cbind(top_percent, mean_profits, mean_not_profits))
+  
+  for(n in 1:101)
+  {
+    # calculate customer-level observed profits
+    obs_prof = data.table(cbind(spend, W))
+    obs_prof[, profit := spend * margin - cost]
+    
+    # find threshold of top n percent scores
+    threshold = quantile(score, probs = 1-top_percent[n])
+    obs_prof[, T := ifelse(profit > threshold, 1, 0)]
+    
+    # calculate mean profit
+    mean_profit = mean(obs_prof[W == 1 & T == 1]$profit)
+    if (is.nan(mean_profit)) mean_profit = 0
+    mean_profit_not = mean(obs_prof[1-W == 1 & 1-T == 1]$profit)
+    if (is.nan(mean_profit_not)) mean_profit_not = 0
+    
+    # scale mean profits
+    mean_profit = mean_profit * nrow(obs_prof[W == 1 & T == 1]) * 1000/length(W)
+    mean_profit_not = mean_profit_not * nrow(obs_prof[1-W == 1 & 1-T == 1]) * 1000/length(W)
+    
+    # add to results table
+    profits_DT[n]$mean_profits = mean_profit
+    profits_DT[n]$mean_not_profits = mean_profit_not
+  }
+  return(profits_DT)
+}
+```
+
+We then created two tables of targeting profits for a range of percentages, separately for the training and validation samples:
+
+```{r}
+# training data
+crm_DT_train = crm_DT[training_sample == 1]
+tr_profits_DT = predictProfitTopPercent(top_percent, pred_DT$profit, 
+                                         crm_DT_train$mailing_indicator, 
+                                         crm_DT_train$outcome_spend, 
+                                         margin, cost)
+
+# validation data
+crm_DT_val = crm_DT[training_sample == 0]
+val_profits_DT = predictProfitTopPercent(top_percent, pred_DT$profit, 
+                                         crm_DT_val$mailing_indicator, 
+                                         crm_DT_val$outcome_spend, 
+                                         margin, cost)
+
+# plot targeting percentages and targeting profit
+ggplot(tr_profits_DT,aes(x = top_percent, y = mean_profits)) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("training targeting") +
+  theme_bw()
+
+ggplot(val_profits_DT,aes(x = top_percent, y = mean_profits)) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  ggtitle("validation targeting") +
+  theme_bw()
+```
+
+Finally, we used the training sample to predict the optimal targeting percentage:
+
+```{r}
+# optimal targeting percentage n*
+opt_targ_perc = tr_profits_DT$top_percent[which.max(tr_profits_DT$mean_profits)]
+paste("optimal targeting percentage:", opt_targ_perc*100.0)
+```
+
+
+
+
+
+
