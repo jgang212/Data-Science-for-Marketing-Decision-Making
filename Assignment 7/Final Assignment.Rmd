@@ -1,0 +1,47 @@
+---
+title: "Targeting Based on Heterogeneous Treatment Effects"
+author: "Jack Gang"
+date: "3/15/2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+## Estimating a causal forest with a large data set
+
+I needed to install and load the `devtools` package to build the `causalTree` package:
+
+```{r, echo = FALSE}
+# causalTree package
+library(devtools)
+install_github("walterwzhang/causalTree")
+```
+
+## Overview
+
+As in the previous assignment, I used customer-level data from the data base of a company that sells kitchenware, housewares, and specialty food products. I again used the October 2015 sample that contains records on 250,000 customers, and in addition I also used a sample from a similar catalog mailing in October 2016 that contains 125,000 records.
+
+The following are the four goals I accomplished:
+
+1. Predict incremental dollar spending that we can attribute to the catalog mailing. In particular, I predicted incremental dollar spending at the customer-level, based on all the features that capture past customer behavior.
+
+2. Predict customer-level incremental profits due to targeting a customer (catalog mailing), and develop a targeting strategy.
+
+3. Evaluate the predictive power and profitability of the targeting strategy. Compare different targeting strategies, based on different estimation methods or heuristics.
+
+4. Evaluate the predictive power and profitability of the targeting strategy that was developed using the 2015 data in an implementation of the strategy in 2016. This evaluation allowed me to assess the strict external validity or transportability of the results. Using more straightforward language, it allowed me to assess if the fancy techniques that I used actually worked.
+
+\newpage
+
+### Summary of findings
+
