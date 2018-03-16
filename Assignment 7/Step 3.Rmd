@@ -1,0 +1,423 @@
+---
+title: "Step 3: How well do the models predict out-of-sample? - Profits and external model validity"
+author: "Jack Gang"
+date: "3/15/2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+I then used a sample of customers from October 2016 to assess how well each of the models predict out-of-sample:
+
+```{r}
+library(bit64)
+library(data.table)
+library(glmnet)
+library(causalTree)
+library(ggplot2)
+library(knitr)
+library(corrplot)
+library(broom)
+load("crm_DT_step2.RData")
+load("large_cor_DT.RData")
+load("CATE-Causal-Forest.RData")
+
+# make a copy of the 2015 crm_DT
+crm_DT_2015 = cbind(crm_DT)
+
+# load 2016 data
+load("/classes/37105/main/Assignment-7/Randomized-Implementation-Sample-2016.RData")
+```
+
+My approach will be the following:
+
+1. Estimate the preduction models using only the 2015 data.
+
+2. Predict the heterogeneous treatment effects for the customers in the October 2016 data.
+
+3. Evaluate the model predictions using the 2016 data.
+
+\newpage
+
+I first performed step 1 by re-estimating all the OLS and LASSO models using all of the 2015 data (no training/validation sample split):
+
+```{r}
+# create all 2015 data set
+crm_est_DT = crm_DT_2015[, !c("customer_id", "training_sample", "tau_cforest",
+                              "tau_lasso", "tau_ols"), with = FALSE]
+
+# load("ols_fit_all.RData")
+# load("lasso_fit_all.RData")
+# load("cv_lasso_fit_all.RData")
+
+# OLS
+ols_fit_all = lm(outcome_spend ~ . + .:W - W, data = crm_est_DT)
+
+# LASSO
+x = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = crm_est_DT)
+y = crm_est_DT$outcome_spend
+
+lasso_fit_all = glmnet(x, y)
+plot(lasso_fit_all, xvar = "lambda")
+
+cv_lasso_fit_all = cv.glmnet(x, y)
+cv_lasso_fit_all$lambda.min
+cv_lasso_fit_all$lambda.1se
+
+#coef(cv_lasso_fit_all, s = "lambda.min")
+plot(cv_lasso_fit_all)
+
+# causal forest - use estimates supplied by professor already in crm_DT
+
+# save output objects for later use
+# save(ols_fit_all, file = "ols_fit_all.RData")
+# save(lasso_fit_all, file = "lasso_fit_all.RData")
+# save(cv_lasso_fit_all, file = "cv_lasso_fit_all.RData")
+```
+
+\newpage
+
+Next, I predicted the heterogeneous treatment effects for the customers in the October 2016 data:
+
+```{r}
+# make 2016 data same format as 2015 data
+
+# rename mailing_indicator
+setnames(crm_DT, "mailing_indicator", "W")
+
+# remove highly correlated variables
+crm_DT = crm_DT[, !large_cor_DT$row, with = FALSE]
+
+# make separate 2016 DTs with W set to 0 and 1 to calculate treatment effect
+val_2016_DT = crm_DT[, !c("customer_id"), with = FALSE]
+valW1_DT = cbind(val_2016_DT)
+valW1_DT[, W := 1]
+valW0_DT = cbind(val_2016_DT)
+valW0_DT[, W := 0]
+
+# predict tau for models
+pred_y_OLS_W1 = predict(ols_fit_all, newdata = valW1_DT)
+pred_y_OLS_W0 = predict(ols_fit_all, newdata = valW0_DT)
+pred_y_OLS = pred_y_OLS_W1 - pred_y_OLS_W0
+
+x_val_W1 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = valW1_DT)
+x_val_W0 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = valW0_DT)
+pred_y_LASSO_W1 = predict(cv_lasso_fit_all, newx = x_val_W1, s = "lambda.min")
+pred_y_LASSO_W0 = predict(cv_lasso_fit_all, newx = x_val_W0, s = "lambda.min")
+pred_y_LASSO = pred_y_LASSO_W1 - pred_y_LASSO_W0
+
+# add predictions to crm_DT
+crm_pred_DT = cbind(crm_DT)
+crm_pred_DT[, tau_ols := pred_y_OLS]
+crm_pred_DT[, tau_lasso := pred_y_LASSO]
+crm_pred_DT[, tau_cforest := predict_DT_2016$tau_cforest]
+
+remove(pred_y_LASSO, pred_y_LASSO_W0, pred_y_LASSO_W1, val_2016_DT, valW0_DT,
+       valW1_DT, x_val_W0, x_val_W1, pred_y_OLS, pred_y_OLS_W0, pred_y_OLS_W1)
+
+# save model predictions to a file
+# save(crm_pred_DT, file = "2016_crm_DT_pred.RData")
+```
+
+Lastly, I evaluated the model predictions using the 2016 data, following all of the steps in Step 2.Rmd:
+
+\newpage
+
+### Descriptive analysis of predicted treatment effects
+
+First, I documented the average treatment effect in the 2016 data:
+
+```{r}
+# calculate ATE in the crm_DT data
+mean_spend_0 = mean(crm_pred_DT[W==0, outcome_spend])
+mean_spend_1 = mean(crm_pred_DT[W==1, outcome_spend])
+ATE = mean_spend_1 - mean_spend_0
+paste("spend 0:", mean_spend_0)
+paste("spend 1:", mean_spend_1)
+paste("ATE:", ATE)
+```
+
+Then, I summarized and graphed the distribution of the predicted heterogeneous treatment effects, $\tau_i$, from the different estimation methods:
+
+```{r}
+# summarize predicted heterogeneous effects
+summary(crm_pred_DT$tau_ols)
+summary(crm_pred_DT$tau_lasso)
+summary(crm_pred_DT$tau_cforest)
+
+# histograph of predicted heterogeneous effects for each model
+ggplot(crm_pred_DT, aes(tau_ols)) + 
+  geom_histogram(binwidth = 2) + scale_x_continuous("OLS tau", 
+                                        limits = c(-5, 50)) +
+  scale_y_continuous("Count", limits = c(-1, 100000))
+
+ggplot(crm_pred_DT, aes(tau_lasso)) + 
+  geom_histogram(binwidth = 2) + scale_x_continuous("LASSO tau", 
+                                        limits = c(-5, 50)) +
+  scale_y_continuous("Count", limits = c(-1, 100000))
+
+ggplot(crm_pred_DT, aes(tau_cforest)) + 
+  geom_histogram(binwidth = 2) + scale_x_continuous("Causal forest tau", 
+                                        limits = c(-5, 50)) +
+  scale_y_continuous("Count", limits = c(-1, 100000))
+```
+
+The predicted heterogeneous treatment effects are similar to before. Compared to the ATE, the median individual treatment effects of all of the estimation methods underestimate the ATE. However, when looking at the mean, all three estimations are much closer to the ATE (whereas for 2015 data, the OLS and LASSO underestimated). Like before, the distribution of individual treatment effects is wider for OLS and LASSO with interquartile ranges of 5.086 and 2.922, respectively, whereas the IQR of the individual treatment effects of the causal forest method is only 1.869. All of this said, it seems that the causal forest treatment effect distribution seems more plausible due to its tighter range.
+
+\newpage
+
+The following matrix tells us that both causal forest and OLS are relatively highly correlated with LASSO (~71% and ~83%, respectively), whereas causal forest and OLS are less correlated at 57%:
+
+```{r}
+# correlation matrix for three estimation methods
+pred_cor_matrix = cor(crm_pred_DT[, c("tau_ols", "tau_lasso", "tau_cforest"), 
+                                  with = FALSE])
+kable(pred_cor_matrix, digits = 4)
+```
+
+\newpage
+
+### Model validation: Lifts
+
+I then evaluated the model fits using lift charts and lift tables that used 20 scores:
+
+```{r}
+# create lift tables - y here is the difference between the mean outcome_spends
+# of the treatment and non-treatment groups
+liftTable <- function(model_name, y, score, W, N_groups = 20) {
+  DT = data.table(y = y, score = score, W = W)
+  DT[, score_group := as.integer(cut_number(score, n = N_groups))]
+  
+  lift_DT = DT[, .(model = model_name,
+                   score = mean(score),
+                   y = mean(y[W==1]) - mean(y[W==0]),
+                   N = .N,
+                   # standard error of difference of two means
+                   std_error = sqrt(var(y[W==0])/length(y[W==0]) + 
+                                       var(y[W==1])/length(y[W==1]))),
+               keyby = score_group]
+  
+  lift_DT[, `:=`(lower = y + qt(0.025, df = N-1)*std_error,
+                 upper = y + qt(0.975, df = N-1)*std_error)]
+  lift_DT[, c("std_error", "N") := NULL]
+  lift_DT[, lift := 100*y/mean(y)]
+  return(lift_DT)
+}
+
+lifts = list(
+  liftTable("OLS", crm_pred_DT$outcome_spend, crm_pred_DT$tau_ols, crm_pred_DT$W),
+  liftTable("LASSO", crm_pred_DT$outcome_spend, crm_pred_DT$tau_lasso, crm_pred_DT$W),
+  liftTable("Causal forest", crm_pred_DT$outcome_spend, crm_pred_DT$tau_cforest, crm_pred_DT$W))
+
+lifts = rbindlist(lifts)
+lifts[, model := factor(model, levels = c("OLS", "LASSO", "Causal forest"))]
+```
+
+\newpage
+
+```{r}
+# summary of lifts
+lifts_wide = dcast(lifts, score_group ~ model, value.var = "y")
+kable(lifts_wide, digits = 2)
+
+# plot lift charts
+ggplot(lifts, aes(x = score_group, y = y)) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  scale_x_continuous("Score", limits = c(1, 20),
+                     breaks = seq(0, 20, 5), minor_breaks = 1:20) +
+  scale_y_continuous("Mean spending", limits = c(-5, 31),
+                     breaks = seq(-10, 30, 5)) +
+  facet_wrap(~ model, ncol = 2) +
+  theme_bw()
+```
+
+From the lift table, we can see that causal forest outperforms LASSO and OLS. In OLS and LASSO, only the top four scores have lifts over 100, while in causal forest, the top five scores meet this threshold.
+
+\newpage
+
+### Profit predictions
+
+I further assessed the degree of the predictive power of each model by looking at profit predictions. I constructed optimal targeting strategies for the different CATE estimation methods. I also evaluated and compared the targeting profits for the different strategies:
+
+```{r}
+# cost and margin
+cost = 0.99
+margin = 0.325
+
+# create input tables for treatment prediction
+profit_crm_DT = crm_pred_DT[, !c("customer_id", "tau_ols", "tau_lasso",
+                                 "tau_cforest"), with = FALSE]
+
+# make separate profit_crm_DT's with W set to 0 and 1 to calculate treatment effect
+profit_crm_DT_W1 = cbind(profit_crm_DT)
+profit_crm_DT_W1[, W := 1]
+profit_crm_DT_W0 = cbind(profit_crm_DT)
+profit_crm_DT_W0[, W := 0]
+
+X_new_W1 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = profit_crm_DT_W1)
+X_new_W0 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = profit_crm_DT_W0)
+
+# predicted profit function: baseline (0, 1, 2) = (optimal, none, all) targeted
+predictProfit <- function(model_name, tau, W, spend, margin, cost, baseline = 0)
+{
+  # Observed profits for treated and untreated units
+  profit_0 = margin*spend
+  profit_1 = margin*spend - cost
+  
+  scale_factor = 1000/length(W)
+  
+  # optimal targeting
+  if (baseline == 1) { cost = 9999999 }
+  else if (baseline == 2) {cost = -9999999 }
+  T = margin*tau > cost
+  N_0 = sum(1-T) # Number of customers not targeted
+  N_1 = sum(T) # Number of customers targeted
+  e = sum(crm_DT$W)/nrow(crm_DT)  # probability a customer is randomly targeted
+  
+  profit = scale_factor*(sum((1-T)*(1-W)*profit_0/(1-e) + T*W*profit_1/e))
+  return(list(model_name, N_1/length(W), profit))
+}
+```
+
+\newpage
+
+```{r}
+# calculate optimal profits for each of the three model estimations compared to two baselines
+opt_profits = list(
+  predictProfit("OLS", crm_pred_DT$tau_ols, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost),
+  predictProfit("LASSO", crm_pred_DT$tau_lasso, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost),
+  predictProfit("Causal Forest", crm_pred_DT$tau_cforest, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost),
+  predictProfit("None", crm_pred_DT$tau_ols, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost, 1),
+  predictProfit("All", crm_pred_DT$tau_ols, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost, 2))
+
+opt_profits = rbindlist(opt_profits)
+colnames(opt_profits) <- c("Model","Targeted %","Optimal Profit")
+kable(opt_profits, digits = 3)
+
+remove(profit_crm_DT, profit_crm_DT_W0, profit_crm_DT_W1, X_new_W0, X_new_W1)
+```
+
+Out of the three estimation methods and two baselines, causal forest yields the highest optimal profits. However, all three of the estimations greatly outperform either of the baseline targeting strategies of all or none targeted. Across the three targeting strategies, OLS targets the most customers at 38%, LASSO is next at 28%, and causal forest targets the least at 27%.
+
+\newpage
+
+### Profits from targeting the top n percent of customers
+
+I also compared the above results with targeting the top $n$ percent of customers based on incremental profits for each of the model estimations:
+
+```{r}
+# predicted increment profit by top percent function
+predictProfitTopPercent <- function(model_name, top_percent, score, W, spend, margin, cost)
+{
+  # Observed profits for treated and untreated units
+  profit_0 = margin*spend
+  profit_1 = margin*spend - cost
+  
+  # Output table
+  K = length(top_percent)
+  profits_DT = data.table(model_name = model_name, top_percent = top_percent,
+                          profit = rep(0.0, K))
+  
+  scale_factor = 1000/length(W)
+  
+  # calculate predicted incremental profits for scoring
+  score = margin*score - cost
+  
+  for (k in 1:K) 
+  {
+    if (top_percent[k] < 1e-12) 
+    {
+      threshold = max(score) + 1 # Make sure everyone is included
+    } 
+    else if (top_percent[k] > 1 - 1e-12) 
+    {
+      threshold = min(score) - 1 # Make sure nobody is included
+    } 
+    else
+    {
+      threshold = quantile(score, probs = 1 - top_percent[k])
+    }
+    
+    T = score >= threshold # Indicator: Is a customer among the top percent?
+    N_0 = sum(1-T) # Number of customers not among the top percent
+    N_1 = sum(T) # Number of customers among the top percent
+    
+    # Now calculate the mean profits for the treated and untreated units
+    mean_profit_0 = sum((1-T)*(1-W)*profit_0)/sum((1-T)*(1-W))
+    mean_profit_1 = sum(T*W*profit_1)/sum(T*W)
+    
+    if (is.nan(mean_profit_0)) mean_profit_0 = 0.0
+    if (is.nan(mean_profit_1)) mean_profit_1 = 0.0
+    
+    profits_DT[k, profit := scale_factor*(N_1*mean_profit_1 + N_0*mean_profit_0)]
+  }
+  
+  return(profits_DT)
+}
+
+# create profit tables based on top percent targeted
+top_percent = seq(from = 0, to = 1, by = 0.01)
+profit_ols = predictProfitTopPercent("OLS", top_percent, crm_pred_DT$tau_ols,
+                               crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost)
+profit_lasso = predictProfitTopPercent("LASSO", top_percent, crm_pred_DT$tau_lasso,
+                               crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost)
+profit_cforest = predictProfitTopPercent("Causal forest", top_percent, crm_pred_DT$tau_cforest,
+                               crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost)
+
+# find optimum targeting percentage and profit at that level
+opt_n_index = which.max(profit_ols$profit)
+paste("OLS", top_percent[opt_n_index], max(profit_ols$profit))
+
+opt_n_index = which.max(profit_lasso$profit)
+paste("LASSO", top_percent[opt_n_index], max(profit_lasso$profit))
+
+opt_n_index = which.max(profit_cforest$profit)
+paste("Causal Forest", top_percent[opt_n_index], max(profit_cforest$profit))
+```
+
+I can see above the optimal targeting percentages for each of the three models as well as the expected profit levels from targeting this percent of customers. I also plotted the corresponding profit curves below:
+
+```{r}
+# plot profit curve
+profit_percent_DT = rbindlist(list(profit_ols, profit_lasso, profit_cforest))
+
+ggplot(profit_percent_DT, aes(x = top_percent, y = profit)) +
+  geom_hline(data = profit_percent_DT[top_percent == 0, .(model_name, profit_0 = profit)],
+             aes(yintercept = profit_0), color = "slategray3", size = 1) +
+  geom_line(color = "mediumvioletred", size = 1) +
+  scale_x_continuous("Percent targeted", limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  scale_y_continuous("Profit", limits = c(1500, 2100),
+                     breaks = seq(1500, 2100, 50)) +
+  theme_bw() +
+  facet_wrap(~ model_name, nrow = 3)
+```
+
+In these curves, but gray horizontal line represents the baseline of targeting no customers and yields a profit of $1683.81. As I also saw above with the optimal targeting strategies, causal forest seems to outperform OLS and LASSO in terms of maximum profit on these curves.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

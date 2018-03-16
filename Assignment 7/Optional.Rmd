@@ -1,0 +1,412 @@
+---
+title: "Optional Analysis"
+author: "Jack Gang"
+date: "3/15/2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+header-includes: \usepackage{color}
+graphics: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
+                      fig.width = 10, fig.height = 10, fig.align = "center")
+```
+
+In this section, I attempted to improve over the LASSO using an elastic net and see if it is competitive with the causal forest. I used the out-of-sample 2016 data for this analysis.
+
+First, I estimated the elastic net by searching for the optimal tuning parameter alpha:
+
+```{r}
+library(bit64)
+library(data.table)
+library(glmnet)
+library(causalTree)
+library(ggplot2)
+library(knitr)
+library(corrplot)
+library(broom)
+load("crm_DT_2015.RData")
+load("crm_DT_2016.RData")
+
+set.seed(961)
+
+# create all 2015 data set
+crm_est_DT = crm_DT_2015[, !c("customer_id", "training_sample", "tau_cforest",
+                              "tau_lasso", "tau_ols"), with = FALSE]
+x = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = crm_est_DT)
+y = crm_est_DT$outcome_spend
+
+# Create 10 folds
+N_obs_training = nrow(crm_est_DT)
+folds = sample(1:10, N_obs_training, replace = TRUE)
+
+# Output table
+alpha_seq = seq(0.03, 0.15, by = 0.01)
+L = length(alpha_seq)
+rmse_DT = data.table(alpha = alpha_seq, mean_cv_error = rep(0, L))
+```
+
+
+```{r, eval=FALSE}
+# Calculate cross-validation error for different alpha values
+for (i in 1:L) 
+  {
+    cv_i = cv.glmnet(x = x, y = y, alpha = rmse_DT[i, alpha], foldid = folds)
+    rmse_DT[i, mean_cv_error := min(cv_i$cvm)]
+    cat("Iteration", i, "cv_error:", min(cv_i$cvm), "\n")
+  }
+
+# Optimal alpha:
+index_min = which.min(rmse_DT$mean_cv_error)
+opt_alpha = rmse_DT[index_min, alpha]
+```
+
+\newpage
+
+```{r}
+# use optimal alpha found above
+opt_alpha = 0.5
+
+# load("fit_elnet.RData")
+# Estimate using the optimal alpha value
+#fit_elnet = cv.glmnet(x = x, y = y, alpha = opt_alpha)
+load("fit_elnet.RData")
+fit_elnet$lambda.min
+fit_elnet$lambda.1se
+```
+
+\newpage
+
+```{r}
+#coef(fit_elnet, s = "lambda.min")
+plot(fit_elnet)
+
+remove(x, folds, y)
+#save(fit_elnet, file = "fit_elnet.RData")
+```
+
+\newpage
+
+Next, I predicted the heterogeneous treatment effects for the customers in the October 2016 data:
+
+```{r}
+# make separate 2016 DTs with W set to 0 and 1 to calculate treatment effect
+val_2016_DT = crm_DT[, !c("customer_id"), with = FALSE]
+valW1_DT = cbind(val_2016_DT)
+valW1_DT[, W := 1]
+valW0_DT = cbind(val_2016_DT)
+valW0_DT[, W := 0]
+
+# predict tau for models
+x_val_W1 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = valW1_DT)
+x_val_W0 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = valW0_DT)
+pred_y_ENET_W1 = predict(fit_elnet, newx = x_val_W1, s = "lambda.min")
+pred_y_ENET_W0 = predict(fit_elnet, newx = x_val_W0, s = "lambda.min")
+pred_y_ENET = pred_y_ENET_W1 - pred_y_ENET_W0
+
+# add predictions to crm_pred_DT
+load("2016_crm_DT_pred.RData")
+crm_pred_DT[, tau_enet := pred_y_ENET]
+
+remove(pred_y_ENET, pred_y_ENET_W0, pred_y_ENET_W1, val_2016_DT, valW0_DT,
+       valW1_DT, x_val_W0, x_val_W1)
+
+# save model predictions to a file
+#save(crm_pred_DT, file = "2016_crm_DT_pred.RData")
+```
+
+Lastly, I evaluated the elastic net model predictions using the 2016 data compared to the other estimates, following all of the steps in Step 3.Rmd:
+
+\newpage
+
+### Descriptive analysis of predicted treatment effects
+
+First, I documented the average treatment effect in the 2016 data:
+
+```{r}
+# calculate ATE in the crm_DT data
+mean_spend_0 = mean(crm_pred_DT[W==0, outcome_spend])
+mean_spend_1 = mean(crm_pred_DT[W==1, outcome_spend])
+ATE = mean_spend_1 - mean_spend_0
+paste("spend 0:", mean_spend_0)
+paste("spend 1:", mean_spend_1)
+paste("ATE:", ATE)
+```
+
+Then, I summarized and graphed the distribution of the predicted heterogeneous treatment effects, $\tau_i$, from the different estimation methods:
+
+```{r}
+# summarize predicted heterogeneous effects
+summary(crm_pred_DT$tau_ols)
+summary(crm_pred_DT$tau_lasso)
+summary(crm_pred_DT$tau_cforest)
+summary(crm_pred_DT$tau_enet)
+
+# histograph of predicted heterogeneous effects for each model
+ggplot(crm_pred_DT, aes(tau_ols)) + 
+  geom_histogram(binwidth = 2) + scale_x_continuous("OLS tau", 
+                                        limits = c(-5, 50)) +
+  scale_y_continuous("Count", limits = c(-1, 100000))
+
+ggplot(crm_pred_DT, aes(tau_lasso)) + 
+  geom_histogram(binwidth = 2) + scale_x_continuous("LASSO tau", 
+                                        limits = c(-5, 50)) +
+  scale_y_continuous("Count", limits = c(-1, 100000))
+
+ggplot(crm_pred_DT, aes(tau_cforest)) + 
+  geom_histogram(binwidth = 2) + scale_x_continuous("Causal forest tau", 
+                                        limits = c(-5, 50)) +
+  scale_y_continuous("Count", limits = c(-1, 100000))
+
+ggplot(crm_pred_DT, aes(tau_enet)) + 
+  geom_histogram(binwidth = 2) + scale_x_continuous("Elastic net tau", 
+                                        limits = c(-5, 50)) +
+  scale_y_continuous("Count", limits = c(-1, 100000))
+```
+
+Compared to the other models, the elastic net estimation is very similar to LASSO in terms of how close its mean is to the observed ATE. The IQR is a little larger than LASSO's, so elastic net's distribution range is wider
+
+\newpage
+
+The following matrix tells us that as expected, LASSO and elastic net are almost perfectly correlated in their predictions:
+
+```{r}
+# correlation matrix for three estimation methods
+pred_cor_matrix = cor(crm_pred_DT[, c("tau_ols", "tau_lasso", "tau_cforest",
+                                      "tau_enet"), with = FALSE])
+kable(pred_cor_matrix, digits = 4)
+```
+
+\newpage
+
+### Model validation: Lifts
+
+I then evaluated the model fits using lift charts and lift tables that used 20 scores:
+
+```{r}
+# create lift tables - y here is the difference between the mean outcome_spends
+# of the treatment and non-treatment groups
+liftTable <- function(model_name, y, score, W, N_groups = 20) {
+  DT = data.table(y = y, score = score, W = W)
+  DT[, score_group := as.integer(cut_number(score, n = N_groups))]
+  
+  lift_DT = DT[, .(model = model_name,
+                   score = mean(score),
+                   y = mean(y[W==1]) - mean(y[W==0]),
+                   N = .N,
+                   # standard error of difference of two means
+                   std_error = sqrt(var(y[W==0])/length(y[W==0]) + 
+                                       var(y[W==1])/length(y[W==1]))),
+               keyby = score_group]
+  
+  lift_DT[, `:=`(lower = y + qt(0.025, df = N-1)*std_error,
+                 upper = y + qt(0.975, df = N-1)*std_error)]
+  lift_DT[, c("std_error", "N") := NULL]
+  lift_DT[, lift := 100*y/mean(y)]
+  return(lift_DT)
+}
+
+lifts = list(
+  liftTable("OLS", crm_pred_DT$outcome_spend, crm_pred_DT$tau_ols, crm_pred_DT$W),
+  liftTable("LASSO", crm_pred_DT$outcome_spend, crm_pred_DT$tau_lasso, crm_pred_DT$W),
+  liftTable("Causal forest", crm_pred_DT$outcome_spend, crm_pred_DT$tau_cforest, crm_pred_DT$W),
+  liftTable("Elastic net", crm_pred_DT$outcome_spend, crm_pred_DT$tau_enet, crm_pred_DT$W))
+
+lifts = rbindlist(lifts)
+lifts[, model := factor(model, levels = c("OLS", "LASSO", "Causal forest", "Elastic net"))]
+```
+
+\newpage
+
+```{r}
+# summary of lifts
+lifts_wide = dcast(lifts, score_group ~ model, value.var = "y")
+kable(lifts_wide, digits = 2)
+
+# plot lift charts
+ggplot(lifts, aes(x = score_group, y = y)) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), color = "deepskyblue2",
+                size = 0.6, width = 0.1) +
+  geom_point(shape = 21, color = "gray30", fill = "hotpink", size = 2.5) +
+  scale_x_continuous("Score", limits = c(1, 20),
+                     breaks = seq(0, 20, 5), minor_breaks = 1:20) +
+  scale_y_continuous("Mean spending", limits = c(-5, 31),
+                     breaks = seq(-10, 30, 5)) +
+  facet_wrap(~ model, ncol = 2) +
+  theme_bw()
+```
+
+From the lift table, we can see that causal forest still outperforms LASSO, OLS, and elastic net. In OLS, LASSO, and elastic net, only the top four scores have lifts over 100, while in causal forest, the top five scores meet this threshold.
+
+\newpage
+
+### Profit predictions
+
+I further assessed the degree of the predictive power of each model by looking at profit predictions. I constructed optimal targeting strategies for the different CATE estimation methods. I also evaluated and compared the targeting profits for the different strategies:
+
+```{r}
+# cost and margin
+cost = 0.99
+margin = 0.325
+
+# create input tables for treatment prediction
+profit_crm_DT = crm_pred_DT[, !c("customer_id", "tau_ols", "tau_lasso",
+                                 "tau_cforest", "tau_enet"), with = FALSE]
+
+# make separate profit_crm_DT's with W set to 0 and 1 to calculate treatment effect
+profit_crm_DT_W1 = cbind(profit_crm_DT)
+profit_crm_DT_W1[, W := 1]
+profit_crm_DT_W0 = cbind(profit_crm_DT)
+profit_crm_DT_W0[, W := 0]
+
+X_new_W1 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = profit_crm_DT_W1)
+X_new_W0 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = profit_crm_DT_W0)
+
+# predicted profit function: baseline (0, 1, 2) = (optimal, none, all) targeted
+predictProfit <- function(model_name, tau, W, spend, margin, cost, baseline = 0)
+{
+  # Observed profits for treated and untreated units
+  profit_0 = margin*spend
+  profit_1 = margin*spend - cost
+  
+  scale_factor = 1000/length(W)
+  
+  # optimal targeting
+  if (baseline == 1) { cost = 9999999 }
+  else if (baseline == 2) {cost = -9999999 }
+  T = margin*tau > cost
+  N_0 = sum(1-T) # Number of customers not targeted
+  N_1 = sum(T) # Number of customers targeted
+  e = sum(crm_DT$W)/nrow(crm_DT)  # probability a customer is randomly targeted
+  
+  profit = scale_factor*(sum((1-T)*(1-W)*profit_0/(1-e) + T*W*profit_1/e))
+  return(list(model_name, N_1/length(W), profit))
+}
+```
+
+\newpage
+
+```{r}
+# calculate optimal profits for each of the three model estimations compared to two baselines
+opt_profits = list(
+  predictProfit("OLS", crm_pred_DT$tau_ols, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost),
+  predictProfit("LASSO", crm_pred_DT$tau_lasso, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost),
+  predictProfit("Causal Forest", crm_pred_DT$tau_cforest, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost),
+  predictProfit("Elastic net", crm_pred_DT$tau_enet, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost),
+  predictProfit("None", crm_pred_DT$tau_ols, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost, 1),
+  predictProfit("All", crm_pred_DT$tau_ols, crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost, 2))
+
+opt_profits = rbindlist(opt_profits)
+colnames(opt_profits) <- c("Model","Targeted %","Optimal Profit")
+kable(opt_profits, digits = 3)
+
+remove(profit_crm_DT, profit_crm_DT_W0, profit_crm_DT_W1, X_new_W0, X_new_W1)
+```
+
+As shown above, elastic net still could not beat causal forest in optimal targeting profits. It targeted about the same percentage of customers as LASSO and causal forest at about 30%.
+
+\newpage
+
+### Profits from targeting the top n percent of customers
+
+I also compared the above results with targeting the top $n$ percent of customers based on incremental profits for each of the model estimations:
+
+```{r}
+# predicted increment profit by top percent function
+predictProfitTopPercent <- function(model_name, top_percent, score, W, spend, margin, cost)
+{
+  # Observed profits for treated and untreated units
+  profit_0 = margin*spend
+  profit_1 = margin*spend - cost
+  
+  # Output table
+  K = length(top_percent)
+  profits_DT = data.table(model_name = model_name, top_percent = top_percent,
+                          profit = rep(0.0, K))
+  
+  scale_factor = 1000/length(W)
+  
+  # calculate predicted incremental profits for scoring
+  score = margin*score - cost
+  
+  for (k in 1:K) 
+  {
+    if (top_percent[k] < 1e-12) 
+    {
+      threshold = max(score) + 1 # Make sure everyone is included
+    } 
+    else if (top_percent[k] > 1 - 1e-12) 
+    {
+      threshold = min(score) - 1 # Make sure nobody is included
+    } 
+    else
+    {
+      threshold = quantile(score, probs = 1 - top_percent[k])
+    }
+    
+    T = score >= threshold # Indicator: Is a customer among the top percent?
+    N_0 = sum(1-T) # Number of customers not among the top percent
+    N_1 = sum(T) # Number of customers among the top percent
+    
+    # Now calculate the mean profits for the treated and untreated units
+    mean_profit_0 = sum((1-T)*(1-W)*profit_0)/sum((1-T)*(1-W))
+    mean_profit_1 = sum(T*W*profit_1)/sum(T*W)
+    
+    if (is.nan(mean_profit_0)) mean_profit_0 = 0.0
+    if (is.nan(mean_profit_1)) mean_profit_1 = 0.0
+    
+    profits_DT[k, profit := scale_factor*(N_1*mean_profit_1 + N_0*mean_profit_0)]
+  }
+  
+  return(profits_DT)
+}
+
+# create profit tables based on top percent targeted
+top_percent = seq(from = 0, to = 1, by = 0.01)
+profit_ols = predictProfitTopPercent("OLS", top_percent, crm_pred_DT$tau_ols,
+                               crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost)
+profit_lasso = predictProfitTopPercent("LASSO", top_percent, crm_pred_DT$tau_lasso,
+                               crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost)
+profit_cforest = predictProfitTopPercent("Causal forest", top_percent, crm_pred_DT$tau_cforest,
+                               crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost)
+profit_enet = predictProfitTopPercent("Elastic net", top_percent, crm_pred_DT$tau_enet,
+                               crm_pred_DT$W, crm_pred_DT$outcome_spend, margin, cost)
+
+# find optimum targeting percentage and profit at that level
+opt_n_index = which.max(profit_ols$profit)
+paste("OLS", top_percent[opt_n_index], max(profit_ols$profit))
+
+opt_n_index = which.max(profit_lasso$profit)
+paste("LASSO", top_percent[opt_n_index], max(profit_lasso$profit))
+
+opt_n_index = which.max(profit_cforest$profit)
+paste("Causal Forest", top_percent[opt_n_index], max(profit_cforest$profit))
+
+opt_n_index = which.max(profit_enet$profit)
+paste("Elastic net", top_percent[opt_n_index], max(profit_enet$profit))
+```
+
+Again, we see that elastic net performs similarly to OLS and LASSO when choosing the optimal top percentage of customers to target. However, it still underperforms elastic net. I also plotted the corresponding profit curves below:
+
+```{r}
+# plot profit curve
+profit_percent_DT = rbindlist(list(profit_ols, profit_lasso, profit_cforest, profit_enet))
+
+ggplot(profit_percent_DT, aes(x = top_percent, y = profit)) +
+  geom_hline(data = profit_percent_DT[top_percent == 0, .(model_name, profit_0 = profit)],
+             aes(yintercept = profit_0), color = "slategray3", size = 1) +
+  geom_line(color = "mediumvioletred", size = 1) +
+  scale_x_continuous("Percent targeted", limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  scale_y_continuous("Profit", limits = c(1500, 2100),
+                     breaks = seq(1500, 2100, 50)) +
+  theme_bw() +
+  facet_wrap(~ model_name, nrow = 3)
+```
+
+In these curves, but gray horizontal line represents the baseline of targeting no customers and yields a profit of $1683.81. As I also saw above, causal forest greatly outperformed elastic net, OLS, and LASSO.
+

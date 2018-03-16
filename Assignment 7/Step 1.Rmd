@@ -19,7 +19,7 @@ knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
 
 In this step, I used the 2015 data to estimate and validate several models to predict the heterogeneous treatment effects:
 
-```{r}
+```{r, cache = TRUE}
 # load libraries
 library(bit64)
 library(data.table)
@@ -38,7 +38,7 @@ crm_DT[, tau_cforest := predict_DT_2015$tau_cforest]
 
 First, I split the sample into a 50% training and 50% validation sample:
 
-```{r}
+```{r, cache = TRUE}
 # split data into training and validation samples
 set.seed(2001)
 crm_DT[, training_sample := rbinom(nrow(crm_DT), 1, 0.5)]
@@ -46,10 +46,12 @@ crm_DT[, training_sample := rbinom(nrow(crm_DT), 1, 0.5)]
 
 To make the code more readable, I renamed the `mailing_indicator` to make it clear that the randomized mailing is the treatment, W:
 
-```{r}
+```{r, cache = TRUE}
 # rename mailing_indicator
 setnames(crm_DT, "mailing_indicator", "W")
 ```
+
+\newpage
 
 ### Data pre-processing
 
@@ -61,18 +63,6 @@ cor_matrix = cor(crm_DT[, !c("customer_id", "W", "outcome_spend"),
                         with = FALSE])
 ```
 
-Next, I created a pdf file to visualize the correlation among all variables in two separate graphs:
-
-```{r, echo = FALSE}
-# create visualization of all variables' correlations
-pdf("Correlation-Matrix.pdf", height = 16, width = 16)
-corrplot(cor_matrix, method = "color", type = "lower", diag = FALSE, 
-         tl.cex = 0.4, tl.col = "gray10")
-corrplot(cor_matrix, method = "number", number.cex = 0.25, addgrid.col = NA,
-         type = "lower", diag = FALSE, tl.cex = 0.4, tl.col = "gray10")
-dev.off()
-```
-
 I then created a data table that contains the correlations for all variable pairs:
 
 ```{r}
@@ -82,22 +72,26 @@ cor_DT = data.table(row = rep(rownames(cor_matrix), ncol(cor_matrix)),
                     col = rep(colnames(cor_matrix), each = ncol(cor_matrix)),
                     cor = as.vector(cor_matrix))
 cor_DT = cor_DT[is.na(cor) == FALSE]
+remove(cor_matrix)
 ```
 
 Finally, I found all correlations larger than 0.95 in absolute value. I inspected these correlations and eliminated one of the virtually redundant variables in each highly correlated pair from the data set:
 
-```{r}
+```{r, cache = TRUE}
 # find all correlations larger than 0.95 in absolute value
 large_cor_DT = cor_DT[abs(cor) > 0.95]
 kable(large_cor_DT, digits = 4)
 
 # eliminate redundant variables in the row column
 crm_DT = crm_DT[, !large_cor_DT$row, with = FALSE]
+remove(cor_DT)
 
 # acquisition_days_since, acquisition_months_since, and in_database_months are
 # highly correlated, and the line above removes two out of the three and keeps
 # acquisition_months_since
 ```
+
+\newpage
 
 ### Randomization checks
 
@@ -112,16 +106,17 @@ paste("Probability of a mailing:", propScore)
 fit = glm(W ~ ., family=binomial(), data=crm_DT)
 results_DT = as.data.table(tidy(fit))
 kable(results_DT[p.value < 0.01], digits = 5)
-
+remove(fit)
+remove(results_DT)
 ```
 
-As seen in the table above, there are only four customer attributes that have better than 0.001 significance in predicting the catalog mailing indicator. Ouf ot the four, three are directly related to outcome spend (`spend_period_1b`, `orders_d_1yr`, `spend_notz_1yr`) which we hypothesize can be attributed to the mailing indicator, and the last one, `customer_id`, has an estimate of zero.
+As seen in the table above, there are only four customer attributes that have better than 0.001 significance in predicting the catalog mailing indicator. Ouf ot the four, three seem directly related to outcome spend (`spend_period_1b`, `orders_d_1yr`, `spend_notz_1yr`) which we hypothesize can be attributed to the mailing indicator, and the last one, `customer_id`, has an estimate of zero.
 
 ### Estimation of heterogeneous treatment effects
 
 I used the training sample to estimate the conditional average treatment effect on dollar spending due to catalog targeting. The following models were estimated: OLS, LASSO, and Causal forest:
 
-```{r}
+```{r, cache = TRUE}
 # create separate training and validation samples
 training_DT = crm_DT[training_sample == 1, 
                      !c("customer_id", "training_sample", "tau_cforest"), 
@@ -144,36 +139,58 @@ cv_lasso_fit = cv.glmnet(x, y)
 cv_lasso_fit$lambda.min
 cv_lasso_fit$lambda.1se
 
-coef(cv_lasso_fit, s = "lambda.min")
+#coef(cv_lasso_fit, s = "lambda.min")
 plot(cv_lasso_fit)
 
 # causal forest - use estimates supplied by professor already in crm_DT
 
 # save output objects for later use
-save(ols_fit, file = "ols_fit.RData")
-save(lasso_fit, file = "lasso_fit.RData")
-save(cv_lasso_fit, file = "cv_lasso_fit.RData")
+load("ols_fit.RData")
+load("lasso_fit.RData")
+load("cv_lasso_fit.RData")
+# save(ols_fit, file = "ols_fit.RData")
+# save(lasso_fit, file = "lasso_fit.RData")
+# save(cv_lasso_fit, file = "cv_lasso_fit.RData")
 ```
+
+\newpage
 
 ### Predict treatment effects
 
 To validate the models, I predicted the treatment effects and saved them to a file:
 
-```{r}
-# predict tau for models
-pred_y_OLS = predict(ols_fit, newdata = validation_DT)
+```{r, cache = TRUE}
+# make separate validation_DT's with W set to 0 and 1 to calculate treatment effect
+valW1_DT = cbind(validation_DT)
+valW1_DT[, W := 1]
+valW0_DT = cbind(validation_DT)
+valW0_DT[, W := 0]
 
-x_val = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = validation_DT)
-pred_y_LASSO = predict(cv_lasso_fit, newx = x_val, s = "lambda.min")
+# predict tau for models
+pred_y_OLS_W1 = predict(ols_fit, newdata = valW1_DT)
+pred_y_OLS_W0 = predict(ols_fit, newdata = valW0_DT)
+pred_y_OLS = pred_y_OLS_W1 - pred_y_OLS_W0
+
+x_val_W1 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = valW1_DT)
+x_val_W0 = model.matrix(outcome_spend ~ 0 + . + .:W - W, data = valW0_DT)
+pred_y_LASSO_W1 = predict(cv_lasso_fit, newx = x_val_W1, s = "lambda.min")
+pred_y_LASSO_W0 = predict(cv_lasso_fit, newx = x_val_W0, s = "lambda.min")
+pred_y_LASSO = pred_y_LASSO_W1 - pred_y_LASSO_W0
 
 predict_DT = crm_DT[training_sample == 0, !c("customer_id", "training_sample"), 
                     with = FALSE][, .(W, outcome_spend, tau_cforest)]
 predict_DT[, tau_ols := pred_y_OLS]
 predict_DT[, tau_lasso := pred_y_LASSO]
 
-# save model predictions to a file
-save(predict_DT, file = "predict_DT.RData")
+remove(x, y, training_DT, validation_DT, x_val_W1, x_val_W0, pred_y_OLS_W1,
+       pred_y_OLS_W0, pred_y_LASSO_W1, pred_y_LASSO_W0, pred_y_OLS, pred_y_lasso,
+       valW0_DT, valW1_DT)
 
+# save model predictions to a file
+# remove(predict_DT)
+# remove(ols_fit, lasso_fit, cv_lasso_fit)
+load("predict_DT.RData")
+# save(predict_DT, file = "predict_DT.RData")
 ```
 
 

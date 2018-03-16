@@ -17,16 +17,6 @@ knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = NA, message = FALSE,
                       fig.width = 10, fig.height = 10, fig.align = "center")
 ```
 
-## Estimating a causal forest with a large data set
-
-I needed to install and load the `devtools` package to build the `causalTree` package:
-
-```{r, echo = FALSE}
-# causalTree package
-library(devtools)
-install_github("walterwzhang/causalTree")
-```
-
 ## Overview
 
 As in the previous assignment, I used customer-level data from the data base of a company that sells kitchenware, housewares, and specialty food products. I again used the October 2015 sample that contains records on 250,000 customers, and in addition I also used a sample from a similar catalog mailing in October 2016 that contains 125,000 records.
@@ -44,4 +34,10 @@ The following are the four goals I accomplished:
 \newpage
 
 ### Summary of findings
+
+In this analysis, the first key finding I realized was that predicting incremental dollar spending that we can attribute to treatment (CATE) is much tricker than just predicting spending, as we did in Assignment 6. The lift tables have much more error and the lift charts were much less cleanly monotonically increasing. The entire calculation is based on a difference in means rather than just a raw spending value, and this added additional complexity when it comes to prediction calculations and standard errors.
+
+However, it was clear that out of OLS, LASSO, and causal forest, causal forest emerged as the winner when it came to predicting incremental spending based on targeting a customer. This makes sense, as by design, causal forest is a method that directly perdicts heterogeneous treatment effects. This contrasts the results in Assignment 6 (predicting just spending), were LASSO and elastic net were better predictors than the tree/forest model. That said, I attempted using an elastic net on top of LASSO with various alpha values, but I was not able to get a lift table or profits that improved upon the causal forest model, at least when testing the out-of-sample 2016 data.
+
+Speaking of which, evaluating the predictive power and profitability of these targeting strategies using out-of-sample data did work, but the results were more noisy and somewhat less predictive than the in-sample 2015 results. This was to be expected; however, it was good to see that the predictive power we fitted in 2015 didn't completely disappear in 2016, but rather still allowed us to predict CATE fairly well, especially when using causal forest.
 
